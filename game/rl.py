@@ -151,10 +151,13 @@ class World:
         p = weird.Painter8(CS, CS)
         j, i = np.mgrid[0:CS, 0:CS]
         R = proto.rnd_cells(cx * CS + i, cy * CS + j, self.seed + 99)
+        big = []
         for y in range(CS):
             for x in range(CS):
-                weird.paint(p, self.species, x, y, b[y, x], R[y, x])
-        s = pygame.image.frombuffer(p.img.tobytes(), (CS * T, CS * T), "P")
+                weird.paint(p, self.species, x, y, b[y, x], R[y, x], defer=big)
+        for (x, y, spr, m, dx) in big:                  # trees and huts overlap the ground round them
+            p.big(x, y, spr, m, dx)
+        s = pygame.image.frombuffer(p.img.tobytes(), (CS * weird.TS, CS * weird.TS), "P")
         s.set_palette([tuple(c) for c in weird.palette(0)])
         s = pygame.transform.scale(s, (CS * PX, CS * PX))
         if len(self.surf) > 40:

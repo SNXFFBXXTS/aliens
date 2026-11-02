@@ -4,7 +4,7 @@ import math, os, sys
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import proto, weird
-from weird import F, T, Painter8, Species
+from weird import F, TS as T, Painter8, Species
 
 OUT = proto.OUT
 

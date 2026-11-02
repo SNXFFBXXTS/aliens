@@ -7,7 +7,11 @@ Sprites are 16x16 char grids: '1' = body (mid shade), '2' = dark/trunk, '3' = br
 import colorsys, math, zlib
 import numpy as np
 
-T = 16
+T = 16          # design grid the generators think in
+RES = 2         # drawn at twice that: thin 1-pixel lines, fine specks
+TS = T * RES    # tile size in pixels
+BIG = {"canopy": 4, "spire": 4, "coral": 4, "eye": 4, "shroom": 4, "bulb": 4, "peak": 4, "hut": 4, "shard": 3}
+_res = RES      # resolution the generators are drawing at right now (BIG kinds draw at 4 = 64 px)
 
 FAM_DEF = {   # dark, mid, bright
     "sea": ("#020814", "#0f4c8a", "#7fe8ff"), "lava": ("#1a0200", "#c42a08", "#fff27a"),
@@ -67,45 +71,59 @@ def palette(t=0.0):
 
 # ── sprite generators ──
 def canvas():
-    return np.full((T, T), ".")
+    return np.full((T * _res, T * _res), ".")
 
 
 def put(c, x, y, ch, over=True):
-    x, y = int(round(x)), int(round(y))
-    if 0 <= x < T and 0 <= y < T and (over or c[y, x] == "."):
+    """x, y in design units (0-16); lands on the fine grid"""
+    n = c.shape[0]
+    x, y = int(round(x * _res)), int(round(y * _res))
+    if 0 <= x < n and 0 <= y < n and (over or c[y, x] == "."):
         c[y, x] = ch
 
 
 def line(c, x0, y0, x1, y1, ch):
-    n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+    n = int(max(abs(x1 - x0), abs(y1 - y0)) * _res) + 1
     for i in range(n + 1):
         put(c, x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, ch)
 
 
 def disc(c, cx, cy, r, ch, rng=None, holes=0.0):
-    for y in range(T):
-        for x in range(T):
+    n = c.shape[0]
+    for py in range(n):
+        for px in range(n):
+            x, y = px / _res, py / _res
             if (x - cx) ** 2 + ((y - cy) * 1.1) ** 2 <= r * r and (rng is None or rng.random() > holes):
-                put(c, x, y, ch)
+                c[py, px] = ch
+
+
+class _Fine:
+    def __iter__(self):
+        return iter(np.arange(0, T, 1 / _res))
+
+
+FINE = _Fine()
 
 
 def mirror(c):
-    c[:, T // 2:] = c[:, :T // 2][:, ::-1]
+    h = c.shape[1] // 2
+    c[:, h:] = c[:, :h][:, ::-1]
     return c
 
 
 def g_spire(rng):
     c = canvas(); x = 7.5 + rng.uniform(-1, 1); lean = rng.uniform(-0.35, 0.35); h = rng.integers(10, 15)
+    px_, py_ = x, 15
     for i in range(h):
         y = 15 - i
         x += lean + rng.uniform(-0.4, 0.4)
-        put(c, x, y, "2")
+        line(c, px_, py_, x, y, "2"); px_, py_ = x, y
         if i > 3 and i % rng.integers(2, 4) == 0:
             d = rng.choice([-1, 1]); bx, by = x, y
             for k in range(rng.integers(2, 5)):
-                bx += d; by -= 0.6 * k
-                put(c, bx, by, "1")
-            put(c, bx, by - 1, "3")
+                nx, ny = bx + d, by - 0.6 * k
+                line(c, bx, by, nx, ny, "1"); bx, by = nx, ny
+            put(c, bx, by - 0.5, "3")
     disc(c, x, 15 - h, 1.3, "3")
     return c
 
@@ -140,12 +158,12 @@ def g_coral(rng):
 def g_bulb(rng):
     c = canvas(); top = rng.uniform(2, 5); side = rng.choice([-1, 1]); reach = rng.uniform(3, 6)
     pts = []
-    for i in range(20):
-        u = i / 19
+    for i in range(40):
+        u = i / 39
         x = 7.5 + side * reach * math.sin(u * math.pi * 0.85)
         y = 15 - (15 - top) * math.sin(u * math.pi / 2)
         put(c, x, y, "2"); pts.append((x, y))
-    for (x, y) in pts[8::4]:
+    for (x, y) in pts[16::8]:
         dl = rng.integers(1, 4)
         line(c, x, y, x, y + dl, "1")
         disc(c, x, y + dl + 1.2, 1.1, "3")
@@ -167,7 +185,7 @@ def g_stalks(rng):
     c = canvas()
     for _ in range(rng.integers(2, 5)):
         x0, h, ph, amp = rng.uniform(2, 13), rng.integers(5, 13), rng.uniform(0, 6), rng.uniform(0.5, 1.5)
-        for i in range(h):
+        for i in np.arange(0, h, 1 / _res):
             put(c, x0 + amp * math.sin(ph + i * 0.6), 15 - i, "1")
         tx, ty = x0 + amp * math.sin(ph + h * 0.6), 15 - h
         if rng.random() < 0.5:
@@ -180,8 +198,8 @@ def g_stalks(rng):
 def g_shroom(rng):
     c = canvas(); cy, r = rng.uniform(4, 7), rng.uniform(4, 6.5)
     line(c, 7.5, 15, 7.5 + rng.uniform(-1.5, 1.5), cy, "2"); line(c, 8.5, 15, 8.5, cy, "2")
-    for y in range(T):
-        for x in range(T):
+    for y in FINE:
+        for x in FINE:
             if y <= cy and (x - 7.5) ** 2 + ((y - cy) * 1.6) ** 2 <= r * r:
                 put(c, x, y, "1")
     for _ in range(rng.integers(3, 6)):
@@ -196,10 +214,10 @@ def g_shard(rng):
     c = canvas()
     for _ in range(rng.integers(1, 4)):
         bx, w, h, tilt = rng.uniform(3, 12), rng.uniform(1.5, 3), rng.integers(5, 14), rng.uniform(-0.25, 0.25)
-        for i in range(h):
+        for i in np.arange(0, h, 1 / _res):
             half = w * (1 - i / h)
             cx = bx + tilt * i
-            for x in np.arange(cx - half, cx + half + 0.01, 0.5):
+            for x in np.arange(cx - half, cx + half + 0.01, 1 / _res):
                 put(c, x, 15 - i, "1")
             put(c, cx - half, 15 - i, "3")
         put(c, bx + tilt * h, 15 - h, "3")
@@ -212,8 +230,8 @@ def g_ribs(rng):
     for k in range(n):
         x = 3 + k * (10 / max(1, n - 1)) if n > 1 else 7.5
         h = rng.uniform(6, 11)
-        for i in range(12):
-            u = i / 11
+        for i in range(30):
+            u = i / 29
             put(c, x - 2.5 * math.cos(u * math.pi / 2) + 2.5, 14 - h * math.sin(u * math.pi / 2) * (1 - u * 0.3), "1")
         put(c, x + 2.5, 14 - h * 0.7, "3")
     return c
@@ -241,20 +259,20 @@ def g_rock(rng):
 
 def g_peak(rng):
     c = canvas(); top = rng.uniform(1, 4); half = rng.uniform(6, 7.5); cx = 7.5 + rng.uniform(-1, 1)
-    for y in range(int(top), 16):
+    for y in np.arange(int(top), 16, 1 / _res):
         w = half * (y - top) / (15 - top)
-        for x in np.arange(cx - w, cx + w + 0.01, 0.5):
+        for x in np.arange(cx - w, cx + w + 0.01, 1 / _res):
             put(c, x, y, "2" if x > cx + w * 0.2 else "1")
         if y < top + 3:
-            for x in np.arange(cx - w, cx + w + 0.01, 0.5):
+            for x in np.arange(cx - w, cx + w + 0.01, 1 / _res):
                 put(c, x, y, "3")
     return c
 
 
 def g_hut(rng):
     c = canvas(); r = rng.uniform(4.5, 6)
-    for y in range(T):
-        for x in range(T):
+    for y in FINE:
+        for x in FINE:
             if y <= 14 and (x - 7.5) ** 2 + ((y - 14) * 1.15) ** 2 <= r * r:
                 put(c, x, y, "1")
     line(c, 7, 14, 7, 12, "2"); line(c, 8, 14, 8, 12, "2")
@@ -311,7 +329,7 @@ def mutate(c, rng):
     if not len(ys):
         return
     for _ in range(rng.integers(1, 4)):
-        i = rng.integers(len(ys)); x, y = xs[i], ys[i]
+        i = rng.integers(len(ys)); x, y = xs[i] / _res, ys[i] / _res
         m = rng.integers(4)
         if m == 0:                                    # an eye
             disc(c, x, y, 1.6, "3"); put(c, x, y, "2")
@@ -334,24 +352,29 @@ class Species:
         self.cache = {}
         self.seed = seed
 
-    def get(self, biome, kind, n):
-        k = (biome, kind, n)
+    def get(self, biome, kind, n, big=False):
+        global _res
+        k = (biome, kind, n, big)
         if k not in self.cache:
             h = zlib.crc32(f"{self.seed}:{biome}:{kind}:{n}".encode())
             rng = np.random.default_rng(h)
-            spr = GEN[kind](rng)
-            if kind not in ("rock", "peak", "hut", "cone") and rng.random() < 0.45:
-                mutate(spr, rng)
+            _res = BIG.get(kind, RES) if big else RES
+            try:
+                spr = GEN[kind](rng)
+                if kind not in ("rock", "peak", "hut", "cone") and rng.random() < 0.45:
+                    mutate(spr, rng)
+            finally:
+                _res = RES
             self.cache[k] = spr
         return self.cache[k]
 
 
 class Painter8:
     def __init__(self, w, h):
-        self.img = np.zeros((h * T, w * T), np.uint8)
+        self.img = np.zeros((h * TS, w * TS), np.uint8)
 
     def cell(self, x, y):
-        return self.img[y * T:(y + 1) * T, x * T:(x + 1) * T]
+        return self.img[y * TS:(y + 1) * TS, x * TS:(x + 1) * TS]
 
     def fill(self, x, y, idx):
         self.cell(x, y)[:] = idx
@@ -366,19 +389,68 @@ class Painter8:
                 msk = np.roll(np.roll(msk, dy, 0), dx, 1)
             c[msk] = idx
 
+    def shadow(self, x, y, spr, dx=0):
+        """the sprite's silhouette, sheared down-right and squashed: sun in the top left"""
+        ys, xs = np.nonzero(spr != ".")
+        if not len(ys):
+            return
+        base = ys.max()
+        h = base - ys
+        sx = np.round(xs + dx + h * 0.65 + 2).astype(int)
+        sy = np.round(base - h * 0.28 + 1).astype(int)
+        c = self.cell(x, y)
+        for ox, oy in ((0, 0), (1, 0), (0, 1)):           # thicken so it reads as a solid shape
+            X, Y = sx + ox, sy + oy
+            ok = (X >= 0) & (X < TS) & (Y >= 0) & (Y < TS)
+            c[Y[ok], X[ok]] = 0
+
+    def big(self, x, y, spr, m, dx=0):
+        """a sprite bigger than its cell: bottom-centre on the cell's bottom-centre, with its long shadow"""
+        n = spr.shape[0]
+        H, W = self.img.shape
+        x0 = x * TS + TS // 2 - n // 2 + dx
+        y0 = (y + 1) * TS - n
+        ys, xs = np.nonzero(spr != ".")
+        if not len(ys):
+            return
+        base = ys.max()
+        h = base - ys
+        sx = np.round(xs + h * 0.7 + 3).astype(int) + x0
+        sy = np.round(base - h * 0.3 + 1).astype(int) + y0
+        for ox, oy in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            X, Y = sx + ox, sy + oy
+            ok = (X >= 0) & (X < W) & (Y >= 0) & (Y < H)
+            self.img[Y[ok], X[ok]] = 0
+        for ch, idx in m.items():
+            yy, xx = np.nonzero(spr == ch)
+            X, Y = xx + x0, yy + y0
+            ok = (X >= 0) & (X < W) & (Y >= 0) & (Y < H)
+            self.img[Y[ok], X[ok]] = idx
+
     def stamp(self, x, y, st, idx, px, py):
         c = self.cell(x, y)
         ys, xs = np.nonzero(st == "1")
         ys, xs = ys + py, xs + px
-        ok = (ys >= 0) & (ys < T) & (xs >= 0) & (xs < T)
+        ok = (ys >= 0) & (ys < TS) & (xs >= 0) & (xs < TS)
         c[ys[ok], xs[ok]] = idx
 
 
-def paint(p, sp, x, y, b, r, local=True):
+def ground(p, x, y, fam, r):
+    """dark tinted ground with a fine grain"""
+    c = p.cell(x, y)
+    c[:] = F(fam, 1)
+    g = np.random.default_rng(int(r[0] * 1e9) & 0xFFFFFFFF).random((TS, TS))
+    c[g < 0.22] = F(fam, 0)
+    c[g > 0.94] = F(fam, 2)
+
+
+def paint(p, sp, x, y, b, r, local=True, defer=None):
+    """b = biome code, r = per-cell random numbers (0..1). With a defer list, big sprites are queued
+    there (x, y, sprite, colours, dx) to be drawn with p.big() after all the ground is down."""
     """b = biome code, r = per-cell random numbers (0..1)"""
     rr = lambda i: float(r[i % len(r)])
     pk = lambda i, n: int(rr(i) * n) % n
-    pos = lambda i: (pk(i, 13), pk(i + 1, 13))
+    pos = lambda i: (pk(i, TS - 3), pk(i + 1, TS - 3))
     if b in WATER:
         depth = WATER[b]
         p.fill(x, y, F("sea", 0) if depth < 2 else F("sea", 1))
@@ -396,26 +468,35 @@ def paint(p, sp, x, y, b, r, local=True):
         return
     if b == "bridge":
         p.fill(x, y, F("sea", 1))
-        for yy in (5, 7, 9, 11):
-            p.cell(x, y)[yy, :] = F("brick", 4 if yy % 4 == 1 else 3)
+        for yy in range(10, 24, 3):
+            p.cell(x, y)[yy:yy + 2, :] = F("brick", 4 if yy % 6 == 1 else 3)
         return
     fam, acc, kinds, marks = BIOMES.get(b, ("stone", None, [], 1))
-    p.fill(x, y, 0)
-    if b in ("road", "plaza"):
-        p.fill(x, y, F("brick", 1))
+    if local:
+        ground(p, x, y, fam, r)                                 # dark tinted ground, so shadows have something to fall on
+    else:
+        p.fill(x, y, 0)
+    if b in ("road", "plaza", "house"):
+        ground(p, x, y, "brick", r) if local else p.fill(x, y, F("brick", 2))
     if b == "crust":
         p.fill(x, y, F("ash", 1))
         p.stamp(x, y, MARKS[8], F("lava", 3), *pos(0)); p.stamp(x, y, MARKS[5], F("lava", 2), *pos(3))
         return
-    for k in range(marks + (1 if marks else 0)):
-        p.stamp(x, y, MARKS[pk(k + 9, len(MARKS))], F(fam, 2 + pk(k + 3, 2)), *pos(k * 2))
+    for k in range(2 * marks + (2 if marks else 0)):       # fine specks: more of them, each smaller
+        p.stamp(x, y, MARKS[pk(k + 9, len(MARKS))], F(fam, 2 + pk(k + 3, 3)), *pos(k * 2))
     roll = rr(5)
     for kind, dens in kinds:
-        dens = 1.0 if not local else dens * 0.6
+        dens = 1.0 if not local else dens * 0.32
         if roll < dens:
-            spr = sp.get(b, kind, pk(6, 8))
             m = {"1": F(fam, 4), "2": F(fam, 2), "3": F(acc, 5) if acc else F(fam, 5)}
-            p.sprite(x, y, spr, m, dx=pk(7, 3) - 1 if local else 0)
+            if local and defer is not None and kind in BIG:
+                defer.append((x, y, sp.get(b, kind, pk(6, 8), big=True), m, pk(7, 9) - 4))
+                return
+            spr = sp.get(b, kind, pk(6, 8))
+            dx = (pk(7, 5) - 2) if local else 0
+            if local:
+                p.shadow(x, y, spr, dx)
+            p.sprite(x, y, spr, m, dx=dx)
             return
         roll -= dens
 
