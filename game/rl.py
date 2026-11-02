@@ -41,11 +41,12 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "desert": "Desert", "salt": "Salt flats", "badlands": "Badlands", "hills": "Hills", "mountain": "Mountains",
          "peak": "Snowy peaks", "ash": "Ash wastes", "lava": "Lava", "crust": "Cooling lava", "volcano": "Volcano",
          "fungal": "Fungal forest", "crystal": "Crystal fields", "lake": "Lake", "river": "River", "road": "Road",
-         "bridge": "Bridge", "house": "House", "plaza": "Town"}
+         "bridge": "Bridge", "house": "House", "plaza": "Town", "trail": "Trail", "bonfire": "Town"}
 BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too deep to swim.",
            "mountain": "The rock face is too steep.", "peak": "The peak is too steep to climb.",
            "house": "Someone lives there.", "lava": "Lava! Far too hot to step in.",
-           "river": "The current's too strong to wade. Find a bridge.", "lake": "The lake's too deep to wade."}
+           "river": "The current's too strong to wade. Find a bridge.", "lake": "The lake's too deep to wade.",
+           "bonfire": "The bonfire's too hot to stand in."}
 
 
 class World:
@@ -58,6 +59,9 @@ class World:
         self.best = mobs.Bestiary(seed)
         self.codes, self.surf = {}, {}
         self.mobs = {}                          # id -> Mob, for every loaded chunk
+        self.feats = {}                         # chunk -> live things drawn every frame: (kind, world px, world py, key)
+        self.fsprites = {}                      # key -> (sprite, colours, kind)
+        self.fires = set()                      # cells with flames in them
         self.seen = {}                          # chunk -> bool array of cells you've laid eyes on
         self.dead = set()
         self.visited = {tuple(map(int, f[:-5].split("_"))) for f in os.listdir(os.path.join(self.dir, "chunks")) if f.endswith(".json")}
@@ -161,11 +165,12 @@ class World:
         p = weird.Painter8(CS, CS)
         j, i = np.mgrid[0:CS, 0:CS]
         R = proto.rnd_cells(cx * CS + i, cy * CS + j, self.seed + 99)
-        big = []
+        items = []
         for y in range(CS):
             for x in range(CS):
-                weird.paint(p, self.species, x, y, b[y, x], R[y, x], defer=big)
-        # trees from the zones next door that lean over the border
+                weird.paint(p, self.species, x, y, b[y, x], R[y, x], defer=items)
+        # big things from the zones next door that lean over the border: their shadows (and rocks/peaks) belong here too
+        nb = []
         for y in range(-1, CS + 3):
             for x in range(-2, CS + 2):
                 if 0 <= x < CS and 0 <= y < CS:
@@ -175,8 +180,28 @@ class World:
                     continue
                 hit = weird.pick_big(self.species, self.cell(gx, gy), proto.rnd_cells(np.array(gx), np.array(gy), self.seed + 99))
                 if hit:
-                    big.append((x, y) + hit)
-        p.draw_big(big)                                  # trees and huts overlap the ground round them
+                    nb.append((hit[0], x, y, hit[1], hit[2], hit[3], True))
+        bigs = sorted([it for it in items + nb if it[6]], key=lambda it: (it[2], it[1]))
+        for (kind, x, y, spr, m, dx, _) in bigs:                 # every shadow first...
+            p.big_shadow(x, y, spr, dx)
+        for (kind, x, y, spr, m, dx, _) in bigs:                 # ...then the things that don't move
+            if kind not in weird.SWAY:
+                p.big_body(x, y, spr, m, dx)
+        feats = []
+        for (kind, x, y, spr, m, dx, big) in sorted(items, key=lambda it: (it[2], it[1])):
+            gx, gy = cx * CS + x, cy * CS + y
+            if kind == "fire":
+                feats.append(("fire", gx * weird.TS, gy * weird.TS, None))
+                self.fires.add((gx, gy))
+            elif kind in weird.SWAY:
+                key = (id(spr), tuple(sorted(m.items())))
+                self.fsprites[key] = (spr, m, kind)
+                n = spr.shape[0]
+                if big:
+                    feats.append((kind, gx * weird.TS + weird.TS // 2 - n // 2 + dx, (gy + 1) * weird.TS - n, key))
+                else:
+                    feats.append((kind, gx * weird.TS + dx, gy * weird.TS, key))
+        self.feats[k] = feats
         s = pygame.image.frombuffer(p.img.tobytes(), (CS * weird.TS, CS * weird.TS), "P")
         s.set_palette([tuple(c) for c in weird.palette(0)])
         s = pygame.transform.scale(s, (CS * PX, CS * PX))
@@ -316,6 +341,9 @@ class Game:
             self.say("The edge of the known world. Nothing but sea beyond.")
             return
         c = self.w.cell(nx, ny)
+        if (nx, ny) in self.w.fires and c != "bonfire":
+            self.say("Flames! You keep back from the fire.")
+            return
         if c in BLOCKED:
             self.say(BLOCKED[c])
             return
@@ -591,6 +619,7 @@ class Game:
                 srf = self.w.surface(cx, cy)
                 srf.set_palette(pal)
                 self.screen.blit(srf, (cx * CS * PX - cxp, cy * CS * PX - cyp + HUD_H))
+        fires = self.draw_live(t, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
         for m in self.w.mobs.values():
             x, y = m.x * PX - cxp, m.y * PX - cyp + HUD_H
             if (m.x, m.y) in self.vis and -PX < x < sw and HUD_H - PX < y < HUD_H + vh:
@@ -603,6 +632,10 @@ class Game:
                     pygame.draw.rect(self.screen, (60, 0, 0), (x + 3, y - 3, PX - 6, 3))
                     pygame.draw.rect(self.screen, (230, 50, 50), (x + 3, y - 3, int((PX - 6) * m.hp / m.maxhp), 3))
         self.screen.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), HUD_H - (cyp % PX)))
+        glow = self.glow_frames()
+        for (fx, fy) in fires:                           # firelight pushes back the dark
+            g = glow[int(t * 7 + fx) % len(glow)]
+            self.screen.blit(g, (fx - g.get_width() // 2, fy - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
         hx, hy = self.px * PX - cxp, self.py * PX - cyp + HUD_H
         self.screen.blit(self.foot_shadow(), (hx + 4, hy + PX - 9))
         self.screen.blit(self.hero, (hx, hy))
@@ -611,6 +644,54 @@ class Game:
             ov = pygame.Surface((sw, vh), pygame.SRCALPHA)
             ov.fill((200, 0, 0, 60))
             self.screen.blit(ov, (0, HUD_H))
+
+    def live_frames(self, key):
+        if key not in self.live_cache:
+            spr, m, kind = self.w.fsprites[key]
+            amp = {"tuft": 2.5, "stalks": 2.0, "shroom": 1.0, "orbs": 1.5}.get(kind, 2.5)
+            frames, pad = weird.sway_frames(spr, m, weird.palette(0), nf=8, amp=amp, bob=(kind == "orbs"))
+            surfs = [pygame.image.frombuffer(a.tobytes(), (a.shape[1], a.shape[0]), "RGBA").convert_alpha() for a in frames]
+            self.live_cache[key] = (surfs, pad)
+        return self.live_cache[key]
+
+    def glow_frames(self):
+        if not hasattr(self, "_glow"):
+            out = []
+            r = int(PX * 3.2)
+            yy, xx = np.mgrid[-r:r, -r:r]
+            d = np.sqrt(xx ** 2 + yy ** 2) / r
+            for k in (0.8, 0.9, 1.0, 0.85):
+                fall = np.clip(1 - d, 0, 1) ** 2 * k
+                a = np.zeros((2 * r, 2 * r, 3), np.uint8)
+                a[..., 0], a[..., 1], a[..., 2] = (fall * 120).astype(np.uint8), (fall * 60).astype(np.uint8), (fall * 18).astype(np.uint8)
+                out.append(pygame.image.frombuffer(a.tobytes(), (2 * r, 2 * r), "RGB").copy())
+            self._glow = out
+        return self._glow
+
+    def draw_live(self, t, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y):
+        """grass and trees swaying (a gust rolls across the land), fires flickering; returns firelight spots"""
+        if not hasattr(self, "live_cache"):
+            self.live_cache = {}
+            self.fire_surfs = [pygame.image.frombuffer(a.tobytes(), (a.shape[1], a.shape[0]), "RGBA").convert_alpha()
+                               for a in weird.fire_frames(11)]
+        fires = []
+        top, bottom = HUD_H - 90, HUD_H + vh + 10
+        for cy in range(c0y - 1, c1y + 2):
+            for cx in range(c0x - 1, c1x + 2):
+                for (kind, wx, wy, key) in self.w.feats.get((cx, cy), ()):
+                    sx, sy = wx - cxp, wy - cyp + HUD_H
+                    if sx < -90 or sx > sw + 10 or sy < top or sy > bottom:
+                        continue
+                    if kind == "fire":
+                        self.screen.blit(self.fire_surfs[int(t * 9 + (wx * 7 + wy * 3) % 6) % 6], (sx, sy))
+                        if (wx // PX, wy // PX) in self.vis:
+                            fires.append((sx + PX // 2, sy + PX * 3 // 4))
+                        continue
+                    surfs, pad = self.live_frames(key)
+                    phase = t * 1.6 - (wx * 0.0045 + wy * 0.0018)        # the wave travels across the land
+                    f = int((phase / 6.2832) % 1 * len(surfs))
+                    self.screen.blit(surfs[f], (sx - pad, sy - pad))
+        return fires
 
     def foot_shadow(self):
         if not hasattr(self, "_foot"):
@@ -640,7 +721,7 @@ class Game:
                 else:
                     a[j, i] = (0, 0, 0, 255)
         srf = pygame.image.frombuffer(a.tobytes(), (cols, rows), "RGBA")
-        srf = pygame.transform.smoothscale(srf, (cols * PX, rows * PX))      # soft edges, no hard blocks
+        srf = pygame.transform.smoothscale(srf, (cols * PX, rows * PX)).convert_alpha()   # soft edges; display format = fast
         self.dark = (key, srf)
         return srf
 

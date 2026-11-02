@@ -86,6 +86,9 @@ class ShowcaseWorld(rl.World):
             b[np.abs(i - rx) <= 1] = "river"
         elif kind == "icesheet":
             b[n2 > 0.66] = "drift"
+        trail = np.abs(proto.fbm(X / 0.9, Y / 0.9, 3, 4302) - 0.5) < 0.0065
+        b[trail & np.isin(b, ["grass", "meadow", "savanna", "forest", "jungle", "hills", "taiga", "tundra", "desert",
+                              "badlands", "fungal", "swamp", "beach", "ash"])] = "trail"
         # soft borders: the edge of the zone before bleeds in
         if cx > 0:
             prev = base_of(ZONES[cx - 1][0])
@@ -104,6 +107,7 @@ class ShowcaseWorld(rl.World):
         rng = np.random.default_rng(5)
         cx, cy = CS // 2, 20
         b[(i - cx) ** 2 + (j - cy) ** 2 < 5 ** 2] = "plaza"
+        b[cy, cx] = "bonfire"
         for k in range(5):
             a = k * 6.28 / 5 + 0.3
             ca, sa = math.cos(a), math.sin(a)

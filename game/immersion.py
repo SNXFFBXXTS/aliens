@@ -105,6 +105,8 @@ D = {
     "crystal": (["Crystal shards ring with shifting colours.", "Light bends strangely here; your shadow has two heads."],
                 ["The crystals chime in the wind.", "A high, pure note hangs in the air."], ["The air is dry and electric.", "Ozone and cold glass."]),
     "beach": (["Pale sand meets dark water.", "Shells crunch underfoot."], ["Waves hush against the shore.", "Gulls, or something gull-shaped."], ["Salt and seaweed."]),
+    "trail": (["A narrow trail, worn by feet or something with more of them.", "A path winds off between the growth."],
+              ["Your steps go quiet on the packed earth."], ["Dust and crushed stems."]),
     "road": (["A worn road, rutted by wheels.", "Old stones mark the way."], ["Your footsteps sound loud on the packed earth."], ["Dust and dung."]),
     "plaza": (["Domed huts crowd round a dusty square.", "Lanterns glow in round windows."], ["Murmured voices, a door creaking.", "Someone is hammering something."],
               ["Woodsmoke and cooking.", "Bread, smoke and animals."]),
@@ -129,7 +131,7 @@ RATE = 22050
 SND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 AMB_OF = {"forest": "forest", "jungle": "jungle", "swamp": "water", "lake": "water", "river": "water", "shallow": "water",
           "beach": "water", "fungal": "fungal", "crystal": "crystal", "ash": "lava", "crust": "lava", "lava": "lava",
-          "plaza": "town", "road": "wind", "grass": "wind", "meadow": "forest", "savanna": "wind", "desert": "wind",
+          "plaza": "town", "bonfire": "town", "trail": "wind", "road": "wind", "grass": "wind", "meadow": "forest", "savanna": "wind", "desert": "wind",
           "salt": "wind", "badlands": "wind", "hills": "wind", "tundra": "cold", "taiga": "cold", "icesheet": "cold",
           "drift": "cold", "seaice": "cold"}
 

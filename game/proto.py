@@ -469,6 +469,10 @@ def gen_cells(wd, ox, oy, zw, zh):
     b[(b == "seaice") & lead] = "shallow"
     drift = fbm(X / 0.5, Y / 0.5, 2, wd.seed + 24) > 0.66
     b[np.isin(b, ["icesheet", "seaice"]) & drift & ~lead] = "drift"
+    # footpaths: thin worn trails wandering through the wilds
+    trail = np.abs(fbm(X / 0.9, Y / 0.9, 3, wd.seed + 60) - 0.5) < 0.0065
+    b[trail & np.isin(b, ["grass", "meadow", "savanna", "forest", "jungle", "hills", "taiga", "tundra", "desert",
+                          "badlands", "fungal", "swamp", "beach", "ash"])] = "trail"
     # rivers and roads: the world links, wiggled with noise, painted onto cells
     def trace(links, radius, label, wig):
         for a, c in links:
@@ -501,6 +505,8 @@ def gen_cells(wd, ox, oy, zw, zh):
             ok = np.isin(b, ["river", "bridge", "lake", "shallow", "ocean", "deep", "lava"], invert=True)
             pr = 1.4 * K                                        # the square
             b[(d2 < pr ** 2) & ok] = "plaza"
+            if 0 <= int(lx) < zw and 0 <= int(ly) < zh and ok[int(ly), int(lx)]:
+                b[int(ly), int(lx)] = "bonfire"                 # a fire in the middle of every town
             lanes = rng.integers(4, 7)
             base = rng.uniform(0, 6.28)
             for k in range(lanes):                              # lanes out of the square, huts both sides

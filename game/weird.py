@@ -297,35 +297,146 @@ def g_cone(rng):
     return c
 
 
+def g_willow(rng):
+    """drooping strands from a short trunk"""
+    c = canvas(); top = rng.uniform(3, 5); cx = 7.5 + rng.uniform(-1, 1)
+    line(c, 7.5, 15, cx, top + 2, "2"); line(c, 8.2, 15, cx + 0.7, top + 2, "2")
+    for k in range(rng.integers(7, 12)):
+        a = rng.uniform(-1.3, 1.3); L = rng.uniform(3, 6); drop = rng.uniform(7, 10)
+        x, y = cx, top + 1
+        for st in range(14):
+            u = st / 13
+            nx = cx + math.sin(a) * L * min(1, u * 2)
+            ny = top + 1 - math.cos(a) * 1.5 * min(1, u * 3) + max(0, u - 0.3) * drop
+            line(c, x, y, nx, ny, "1"); x, y = nx, ny
+        put(c, x, y + 0.5, "3")
+    return c
+
+
+def g_tiers(rng):
+    """stacked layers, like a frosted pine or a pagoda"""
+    c = canvas(); n = int(rng.integers(3, 6)); cx = 7.5
+    line(c, cx, 15, cx, 2, "2")
+    for k in range(n):
+        y = 13 - k * (10 / n); w = (n - k) * rng.uniform(1.0, 1.5) + 1; droop = rng.uniform(0.15, 0.35)
+        for x in np.arange(cx - w, cx + w + 0.01, 1 / _res):
+            put(c, x, y - (w - abs(x - cx)) * droop * 0.6, "1")
+            put(c, x, y - (w - abs(x - cx)) * droop * 0.6 + 0.5, "1")
+        put(c, cx - w, y + 0.5, "3"); put(c, cx + w, y + 0.5, "3")
+    put(c, cx, 1.5, "3")
+    return c
+
+
+def g_twist(rng):
+    """a corkscrew trunk with a ragged ball of leaves"""
+    c = canvas(); h = rng.uniform(9, 12); ph = rng.uniform(0, 6)
+    px, py = 7.5, 15
+    for i in np.arange(0, h, 0.25):
+        x = 7.5 + math.sin(ph + i * 0.9) * 1.6; y = 15 - i
+        line(c, px, py, x, y, "2"); px, py = x, y
+    disc(c, px, py - 1.5, rng.uniform(2.5, 3.8), "1", rng, 0.25)
+    for _ in range(rng.integers(2, 5)):
+        put(c, px + rng.uniform(-2.5, 2.5), py - 1.5 + rng.uniform(-2, 2), "3")
+    return c
+
+
+def g_fronds(rng):
+    """a leaning trunk with long arching fronds"""
+    c = canvas(); top = rng.uniform(3, 5.5); lean = rng.uniform(-1.5, 1.5)
+    line(c, 7.5, 15, 7.5 + lean, top, "2")
+    tx, ty = 7.5 + lean, top
+    for k in range(rng.integers(5, 8)):
+        a = -math.pi / 2 + rng.uniform(-1.6, 1.6); L = rng.uniform(4, 6.5)
+        x, y = tx, ty
+        for st in range(12):
+            u = (st + 1) / 12
+            nx = tx + math.cos(a) * L * u; ny = ty + math.sin(a) * L * u + (u ** 2) * L * 0.8
+            line(c, x, y, nx, ny, "1"); x, y = nx, ny
+            if st % 3 == 1:
+                put(c, nx, ny + 0.6, "1")
+    disc(c, tx, ty, 0.9, "3")
+    return c
+
+
+def g_spikes(rng):
+    """a dead, thorny tree"""
+    c = canvas()
+    def br(x, y, a, ln, d):
+        x1, y1 = x + math.sin(a) * ln, y - math.cos(a) * ln
+        line(c, x, y, x1, y1, "2" if d == 0 else "1")
+        if d < 4 and ln > 1:
+            for sgn in (-1, 1):
+                if rng.random() < 0.8:
+                    br(x1, y1, a + sgn * rng.uniform(0.4, 1.1), ln * rng.uniform(0.45, 0.7), d + 1)
+    br(7.5, 15, rng.uniform(-0.15, 0.15), rng.uniform(4, 6), 0)
+    return c
+
+
+def g_pillar(rng):
+    """a wind-carved rock pillar with a cap"""
+    c = canvas(); h = rng.uniform(8, 13); w = rng.uniform(1.4, 2.4)
+    for y in np.arange(15 - h, 15.01, 1 / _res):
+        ww = w * (1 + 0.25 * math.sin(y * 1.3))
+        for x in np.arange(7.5 - ww, 7.5 + ww + 0.01, 1 / _res):
+            put(c, x, y, "2" if x > 7.5 + ww * 0.3 else "1")
+    disc(c, 7.5, 15 - h, w * 1.6, "1")
+    put(c, 7.5 - w, 15 - h, "3")
+    return c
+
+
+def g_tuft(rng):
+    """a clump of grass blades at the foot of the cell"""
+    c = canvas()
+    for _ in range(rng.integers(3, 7)):
+        x0 = rng.uniform(2, 14); h = rng.uniform(2.5, 6); bend = rng.uniform(-1.2, 1.2)
+        px, py = x0, 15.5
+        for st in range(1, 8):
+            u = st / 7
+            x, y = x0 + bend * u * u, 15.5 - h * u
+            line(c, px, py, x, y, "1" if u < 0.7 else "3"); px, py = x, y
+    return c
+
+
 GEN = {"spire": g_spire, "canopy": g_canopy, "coral": g_coral, "bulb": g_bulb, "eye": g_eye, "stalks": g_stalks,
        "shroom": g_shroom, "shard": g_shard, "ribs": g_ribs, "orbs": g_orbs, "rock": g_rock, "peak": g_peak,
-       "hut": g_hut, "cone": g_cone}
+       "hut": g_hut, "cone": g_cone, "willow": g_willow, "tiers": g_tiers, "twist": g_twist, "fronds": g_fronds,
+       "spikes": g_spikes, "pillar": g_pillar, "tuft": g_tuft}
+BIG.update({"willow": 4, "tiers": 4, "twist": 4, "fronds": 4, "spikes": 4, "pillar": 4})
+# drawn live every frame (they sway); everything else is painted into the ground once
+SWAY = {"canopy", "spire", "coral", "eye", "shroom", "bulb", "willow", "tiers", "twist", "fronds", "stalks", "tuft", "orbs"}
+# how much of the listed density shows up in a zone (trees thinned out; rock, peaks, grass, fire as listed)
+THIN = {"tuft": 1.0, "rock": 1.0, "peak": 1.0, "hut": 1.0, "cone": 1.0, "fire": 1.0, "shard": 0.6}
 
-# biome: family, accent family for '3' (None = own), [(kind, local density)], ground marks per cell
+# biome: family, accent family for '3' (None = own), [(kind, density)], ground marks per cell
 BIOMES = {
-    "grass": ("moss", None, [("stalks", 0.12), ("spire", 0.02)], 2),
-    "meadow": ("bloom", None, [("stalks", 0.18), ("bulb", 0.04)], 2),
-    "savanna": ("ochre", None, [("stalks", 0.1), ("spire", 0.035)], 2),
-    "forest": ("witch", "eye", [("canopy", 0.3), ("spire", 0.12), ("eye", 0.03)], 1),
-    "jungle": ("lumen", None, [("coral", 0.3), ("bulb", 0.2), ("canopy", 0.12)], 2),
-    "swamp": ("bog", None, [("stalks", 0.3), ("bulb", 0.1)], 2),
-    "taiga": ("frost", None, [("spire", 0.3), ("shard", 0.05)], 1),
-    "tundra": ("ice", None, [("shard", 0.04), ("stalks", 0.03)], 1),
-    "icesheet": ("ice", None, [("shard", 0.06)], 1), "drift": ("ice", None, [("rock", 0.05)], 2),
-    "desert": ("dune", None, [("ribs", 0.02), ("shard", 0.015)], 2),
-    "salt": ("salt", None, [("shard", 0.06)], 2),
-    "badlands": ("rust", None, [("ribs", 0.04), ("spire", 0.04)], 2),
-    "hills": ("moss", None, [("rock", 0.12), ("stalks", 0.08)], 2),
-    "mountain": ("stone", None, [("rock", 0.75)], 1), "peak": ("stone", "ice", [("peak", 0.6), ("rock", 0.3)], 1),
-    "ash": ("ash", "lava", [("ribs", 0.04), ("spire", 0.04), ("rock", 0.05)], 2),
-    "crust": ("ash", "lava", [], 1), "volcano": ("ash", "lava", [("cone", 1.0)], 1),
-    "fungal": ("spore", None, [("shroom", 0.28), ("orbs", 0.12)], 2),
-    "crystal": ("prism", None, [("shard", 0.38)], 2),
-    "beach": ("salt", None, [("stalks", 0.02)], 1),
+    "grass": ("moss", None, [("tuft", 0.45), ("stalks", 0.1), ("twist", 0.05), ("spire", 0.04)], 2),
+    "meadow": ("bloom", None, [("tuft", 0.4), ("stalks", 0.15), ("willow", 0.08), ("bulb", 0.05)], 2),
+    "savanna": ("ochre", None, [("tuft", 0.5), ("fronds", 0.08), ("spire", 0.05), ("spikes", 0.04)], 2),
+    "forest": ("witch", "eye", [("canopy", 0.25), ("tiers", 0.14), ("willow", 0.1), ("twist", 0.08), ("spire", 0.08),
+                                ("eye", 0.04), ("tuft", 0.12)], 1),
+    "jungle": ("lumen", None, [("coral", 0.22), ("fronds", 0.2), ("bulb", 0.15), ("canopy", 0.1), ("tuft", 0.2)], 2),
+    "swamp": ("bog", None, [("tuft", 0.25), ("stalks", 0.25), ("willow", 0.12), ("bulb", 0.08)], 2),
+    "taiga": ("frost", None, [("tiers", 0.4), ("spire", 0.12), ("shard", 0.05)], 1),
+    "tundra": ("ice", None, [("tuft", 0.12), ("shard", 0.08), ("spikes", 0.04)], 1),
+    "icesheet": ("ice", None, [("shard", 0.3)], 1), "drift": ("ice", None, [("shard", 0.12), ("rock", 0.06)], 2),
+    "desert": ("dune", None, [("pillar", 0.05), ("ribs", 0.03), ("spikes", 0.02), ("shard", 0.015)], 2),
+    "salt": ("salt", None, [("shard", 0.12)], 2),
+    "badlands": ("rust", None, [("pillar", 0.1), ("spikes", 0.08), ("ribs", 0.04)], 2),
+    "hills": ("moss", None, [("tuft", 0.3), ("rock", 0.1), ("twist", 0.04), ("stalks", 0.06)], 2),
+    "mountain": ("stone", None, [("peak", 0.5), ("rock", 0.35)], 1), "peak": ("stone", "ice", [("peak", 0.8), ("rock", 0.2)], 1),
+    "ash": ("ash", "lava", [("fire", 0.02), ("spikes", 0.1), ("ribs", 0.04), ("rock", 0.05)], 2),
+    "crust": ("ash", "lava", [("fire", 0.03)], 1), "volcano": ("ash", "lava", [("cone", 1.0)], 1),
+    "fungal": ("spore", None, [("shroom", 0.3), ("orbs", 0.14), ("bulb", 0.06), ("tuft", 0.1)], 2),
+    "crystal": ("prism", None, [("shard", 0.45)], 2),
+    "beach": ("salt", None, [("tuft", 0.08), ("fronds", 0.03)], 1),
+    "trail": ("brick", None, [], 2),
     "road": ("brick", None, [], 3), "plaza": ("brick", None, [], 3), "house": ("brick", "eye", [("hut", 1.0)], 0),
+    "bonfire": ("brick", None, [("fire", 1.0)], 3),
 }
 WATER = {"deep": 0, "ocean": 1, "shallow": 2, "lake": 2, "river": 2}
 
+WAVE = np.array([list(r) for r in "..11...|.1..1..|1....11".split("|")])
+BLOB = np.array([list(r) for r in ".111.|11111|11111|.111.".split("|")])
 MARKS = [np.array([list(r) for r in s.split("|")]) for s in
          ("1", "1.|.1", ".1.|1.1", "11", "1|1", "1..|.11", "1.1", ".1|1.", "11.|..1")]
 
@@ -479,17 +590,17 @@ def paint(p, sp, x, y, b, r, local=True, defer=None):
     if b in WATER:
         depth = WATER[b]
         p.fill(x, y, F("sea", 0) if depth < 2 else F("sea", 1))
-        for k in range(1 + (depth > 0)):
+        for k in range(3 + 2 * (depth > 0)):                     # ripples (they shimmer with the palette)
             px, py = pos(k * 2)
-            st = MARKS[7] if k == 0 else MARKS[1]
-            p.stamp(x, y, st, F("sea", [3, 5, 6][depth] - k), px, py)
+            st = WAVE if k % 2 == 0 else MARKS[1]
+            p.stamp(x, y, st, F("sea", [3, 5, 6][depth] - (k % 3)), px, py)
         return
     if b == "seaice":
         p.fill(x, y, F("ice", 1)); p.stamp(x, y, MARKS[8], F("ice", 5), *pos(0)); p.stamp(x, y, MARKS[0], F("ice", 7), *pos(2)); return
     if b == "lava":
-        p.fill(x, y, F("lava", 1))
-        for k in range(3):
-            p.stamp(x, y, MARKS[[7, 2, 1][k]], F("lava", 4 + k), *pos(k * 2))
+        p.fill(x, y, F("lava", 2))
+        for k in range(7):                                       # molten blobs that churn with the palette
+            p.stamp(x, y, BLOB if k < 4 else MARKS[[7, 2, 1][k % 3]], F("lava", 3 + k % 5), *pos(k * 2))
         return
     if b == "bridge":
         p.fill(x, y, F("sea", 1))
@@ -506,44 +617,98 @@ def paint(p, sp, x, y, b, r, local=True, defer=None):
     if b == "crust":
         p.fill(x, y, F("ash", 1))
         p.stamp(x, y, MARKS[8], F("lava", 3), *pos(0)); p.stamp(x, y, MARKS[5], F("lava", 2), *pos(3))
-        return
+        marks = 0
     for k in range(2 * marks + (2 if marks else 0)):       # fine specks: more of them, each smaller
         p.stamp(x, y, MARKS[pk(k + 9, len(MARKS))], F(fam, 2 + pk(k + 3, 3)), *pos(k * 2))
-    roll = rr(5)
-    for kind, dens in kinds:
-        dens = 1.0 if not local else dens * 0.32
-        if roll < dens:
-            m = {"1": F(fam, 4), "2": F(fam, 2), "3": F(acc, 5) if acc else F(fam, 5)}
-            if local and defer is not None and kind in BIG:
-                defer.append((x, y, sp.get(b, kind, pk(6, 8), big=True), m, pk(7, 9) - 4))
-                return
-            spr = sp.get(b, kind, pk(6, 8))
-            dx = (pk(7, 5) - 2) if local else 0
-            if local:
-                p.shadow(x, y, spr, dx)
-            p.sprite(x, y, spr, m, dx=dx)
-            return
-        roll -= dens
+    hit = pick(sp, b, r, local)
+    if not hit:
+        return
+    kind, spr, m, dx, big = hit
+    if local and defer is not None and (kind in SWAY or kind == "fire" or big):
+        defer.append((kind, x, y, spr, m, dx, big))
+        return
+    if kind == "fire":
+        return
+    if local:
+        p.shadow(x, y, spr, dx)
+    p.sprite(x, y, spr, m, dx=dx)
 
 
-def pick_big(sp, b, r):
-    """the big sprite (tree/hut/peak) this cell grows, if any: (sprite, colours, dx) or None.
-    Same rolls as paint(), so a zone can draw its neighbours' trees that lean over the border."""
-    if b in WATER or b in ("seaice", "lava", "bridge", "crust"):
+def pick(sp, b, r, local=True):
+    """what grows or stands in this cell: (kind, sprite, colours, dx, big) or None. Pure: the same cell always
+    gives the same answer, so neighbouring zones can ask about each other's border cells."""
+    if b in WATER or b in ("seaice", "lava", "bridge"):
         return None
     fam, acc, kinds, marks = BIOMES.get(b, ("stone", None, [], 1))
     rr = lambda i: float(r[i % len(r)])
     pk = lambda i, n: int(rr(i) * n) % n
     roll = rr(5)
     for kind, dens in kinds:
-        dens = dens * 0.32
+        if local:
+            dens *= THIN.get(kind, 0.32)
+        else:
+            dens = 1.0
+            if kind in ("tuft", "fire"):
+                continue
         if roll < dens:
-            if kind not in BIG:
-                return None
             m = {"1": F(fam, 4), "2": F(fam, 2), "3": F(acc, 5) if acc else F(fam, 5)}
-            return sp.get(b, kind, pk(6, 8), big=True), m, pk(7, 9) - 4
+            if kind == "fire":
+                return ("fire", None, m, 0, False)
+            big = local and kind in BIG
+            spr = sp.get(b, kind, pk(6, 12), big=big)
+            dx = (pk(7, 9) - 4) if big else ((pk(7, 5) - 2) if local else 0)
+            return (kind, spr, m, dx, big)
         roll -= dens
     return None
+
+
+def pick_big(sp, b, r):
+    """the big sprite (tree/hut/peak) a cell grows, if any: (kind, sprite, colours, dx) or None"""
+    hit = pick(sp, b, r)
+    if hit and hit[4]:
+        return hit[0], hit[1], hit[2], hit[3]
+    return None
+
+
+def fire_frames(seed, nf=6):
+    """flickering flames on embers, as RGBA frames (TS x TS)"""
+    rng = np.random.default_rng(seed)
+    cols = [(255, 246, 200), (255, 200, 70), (245, 120, 35), (180, 45, 20)]
+    out = []
+    for f in range(nf):
+        a = np.zeros((TS, TS, 4), np.uint8)
+        a[TS - 5:TS - 3, 9:23] = (70, 34, 20, 255)
+        a[TS - 4, 11:21] = (150, 60, 20, 255)
+        for x in range(10, 22):
+            h = int(rng.uniform(4, 15) * (1 - abs(x - 15.5) / 7.5)) + 1
+            for y in range(TS - 5 - h, TS - 4):
+                u = (TS - 5 - y) / max(1, h)
+                a[y, x] = cols[min(3, int(u * 4))] + (255,)
+        for _ in range(rng.integers(1, 4)):                     # sparks
+            a[rng.integers(4, TS - 16), rng.integers(9, 23)] = (255, 200, 90, 255)
+        out.append(a)
+    return out
+
+
+def sway_frames(spr, m, pal, nf=8, amp=2.0, bob=False):
+    """the sprite bending in the wind (top moves most, roots stay put), as RGBA frames"""
+    n = spr.shape[0]
+    pad = int(math.ceil(amp)) + 1
+    ys, xs = np.nonzero(spr != ".")
+    cols = np.array([pal[m.get(ch, 0)] for ch in spr[ys, xs]], np.uint8)
+    lift = ((n - 1 - ys) / max(1, n - 1)) ** 1.5
+    out = []
+    for f in range(nf):
+        s = math.sin(2 * math.pi * f / nf)
+        a = np.zeros((n + 2 * pad, n + 2 * pad, 4), np.uint8)
+        if bob:
+            X, Y = xs + pad, ys + pad + int(round(s * amp))
+        else:
+            X, Y = xs + pad + np.round(s * amp * lift).astype(int), ys + pad
+        a[Y, X, :3] = cols
+        a[Y, X, 3] = 255
+        out.append(a)
+    return out, pad
 
 
 def to_rgb(img8, t=0.0):
