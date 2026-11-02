@@ -290,8 +290,9 @@ class Game:
         if self.show_map or self.dead:
             return
         if getattr(self, "facing", None) != (dx, dy):
-            self.facing = (dx, dy)
-            self.update_view()                   # turning to look is free
+            self.facing = (dx, dy)               # first press in a new direction: just turn and look (free)
+            self.update_view()
+            return
         nx, ny = self.px + dx, self.py + dy
         m = self.w.mob_at(nx, ny)
         if m:
