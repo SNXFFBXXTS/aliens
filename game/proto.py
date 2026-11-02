@@ -453,6 +453,74 @@ def render_world(wd):
 
 
 # ── a zoomed-in zone ──
+def link_points(wd, a, c, wig):
+    """the wiggled centre line of a world link (road or river), in world coords"""
+    u = np.linspace(0, 1, ZS * 2 + 1)
+    ax, ay, cx_, cy_ = a[0] + 0.5, a[1] + 0.5, c[0] + 0.5, c[1] + 0.5
+    px, py = ax + (cx_ - ax) * u, ay + (cy_ - ay) * u
+    n1 = (fbm(px * 1.7, py * 1.7, 2, wd.seed + 40) - 0.5) * wig
+    n2 = (fbm(px * 1.7, py * 1.7, 2, wd.seed + 41) - 0.5) * wig
+    return np.stack([px + n1, py + n2], 1)
+
+
+def road_lines(wd, x0, y0, x1, y1):
+    """centre lines of the roads passing near the world box (x0, y0)-(x1, y1)"""
+    out = []
+    for a, c in wd.dlinks:
+        if max(a[0], c[0]) + 1.5 < x0 or min(a[0], c[0]) - 0.5 > x1 or max(a[1], c[1]) + 1.5 < y0 or min(a[1], c[1]) - 0.5 > y1:
+            continue
+        out.append(link_points(wd, a, c, 1.0))
+    return out
+
+
+TRAIL_LAND = {"grass", "meadow", "savanna", "forest", "jungle", "hills", "taiga", "tundra", "desert", "badlands",
+              "fungal", "swamp", "beach", "ash", "salt", "drift", "icesheet", "crystal"}
+
+
+def waypoint(wd, tx, ty):
+    return (tx + 0.2 + 0.6 * float(cell_rand(np.array(tx), np.array(ty), wd.seed + 72)),
+            ty + 0.2 + 0.6 * float(cell_rand(np.array(tx), np.array(ty), wd.seed + 73)))
+
+
+def trail_lines(wd, x0, y0, x1, y1):
+    """footpaths: each world square has a waypoint; some neighbouring waypoints are joined by a meandering
+    path. Worked out from world coordinates alone, so paths run on unbroken from zone to zone."""
+    out = []
+    for ty in range(int(np.floor(y0)) - 1, int(np.floor(y1)) + 2):
+        for tx in range(int(np.floor(x0)) - 1, int(np.floor(x1)) + 2):
+            for dx, dy, k in ((1, 0, 1), (0, 1, 2)):
+                ux, uy = tx + dx, ty + dy
+                if not (0 <= tx < W and 0 <= ty < H and 0 <= ux < W and 0 <= uy < H):
+                    continue
+                if str(wd.biome[ty, tx]) not in TRAIL_LAND or str(wd.biome[uy, ux]) not in TRAIL_LAND:
+                    continue
+                h = float(cell_rand(np.array(tx * 3 + k), np.array(ty * 3 + k), wd.seed + 70))
+                if h > 0.4:
+                    continue
+                a, b = waypoint(wd, tx, ty), waypoint(wd, ux, uy)
+                u = np.linspace(0, 1, 61)
+                px, py = a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u
+                L = math.hypot(b[0] - a[0], b[1] - a[1]) or 1
+                nx, ny = -(b[1] - a[1]) / L, (b[0] - a[0]) / L
+                off = (fbm(u * 2.5 + h * 37, np.full_like(u, k + 0.5), 3, wd.seed + 71) - 0.5) * 1.1 * np.sin(np.pi * u)
+                out.append(np.stack([px + nx * off, py + ny * off], 1))
+    return out
+
+
+def mark_trails(b, ox, oy, zw, zh, lines):
+    """the cells a footpath passes through become 'trail' (only on open land)"""
+    for pts in lines:
+        lx = np.floor((pts[:, 0] - ox) * ZS).astype(int)
+        ly = np.floor((pts[:, 1] - oy) * ZS).astype(int)
+        # fill the gaps between points so the cells join up
+        for (x0_, y0_), (x1_, y1_) in zip(zip(lx[:-1], ly[:-1]), zip(lx[1:], ly[1:])):
+            n = max(abs(x1_ - x0_), abs(y1_ - y0_), 1)
+            for q in range(n + 1):
+                x = x0_ + round((x1_ - x0_) * q / n); y = y0_ + round((y1_ - y0_) * q / n)
+                if 0 <= x < zw and 0 <= y < zh and str(b[y, x]) in TRAIL_LAND:
+                    b[y, x] = "trail"
+
+
 def gen_cells(wd, ox, oy, zw, zh):
     """the terrain of a local area: ox, oy = world coords of its top-left; zw x zh cells (ZS per world tile).
     Depends only on the seed and the coordinates, so any piece of the world comes out the same every time."""
@@ -469,22 +537,16 @@ def gen_cells(wd, ox, oy, zw, zh):
     b[(b == "seaice") & lead] = "shallow"
     drift = fbm(X / 0.5, Y / 0.5, 2, wd.seed + 24) > 0.66
     b[np.isin(b, ["icesheet", "seaice"]) & drift & ~lead] = "drift"
-    # footpaths: thin worn trails wandering through the wilds
-    trail = np.abs(fbm(X / 0.9, Y / 0.9, 3, wd.seed + 60) - 0.5) < 0.0065
-    b[trail & np.isin(b, ["grass", "meadow", "savanna", "forest", "jungle", "hills", "taiga", "tundra", "desert",
-                          "badlands", "fungal", "swamp", "beach", "ash"])] = "trail"
+    # footpaths: a world-wide network of meandering trails between waypoints
+    mark_trails(b, ox, oy, zw, zh, trail_lines(wd, ox, oy, ox + zw / ZS, oy + zh / ZS))
     # rivers and roads: the world links, wiggled with noise, painted onto cells
     def trace(links, radius, label, wig):
         for a, c in links:
             ax, ay, cx_, cy_ = a[0] + 0.5, a[1] + 0.5, c[0] + 0.5, c[1] + 0.5
             if max(ax, cx_) < ox - 1 or min(ax, cx_) > ox + zw / ZS + 1 or max(ay, cy_) < oy - 1 or min(ay, cy_) > oy + zh / ZS + 1:
                 continue
-            for s in range(ZS * 2 + 1):
-                u = s / (ZS * 2)
-                px, py = ax + (cx_ - ax) * u, ay + (cy_ - ay) * u
-                n1 = (fbm(np.array(px * 1.7), np.array(py * 1.7), 2, wd.seed + 40) - 0.5) * wig
-                n2 = (fbm(np.array(px * 1.7), np.array(py * 1.7), 2, wd.seed + 41) - 0.5) * wig
-                lx, ly = (px + n1 - ox) * ZS, (py + n2 - oy) * ZS
+            for (wx, wy) in link_points(wd, a, c, wig):
+                lx, ly = (wx - ox) * ZS, (wy - oy) * ZS
                 m = (i - lx + 0.5) ** 2 + (j - ly + 0.5) ** 2 <= radius ** 2
                 if label == "road":
                     m &= np.isin(b, ["lava"], invert=True)

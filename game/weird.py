@@ -812,62 +812,93 @@ def _bricks(p, mask, ox, oy, seed, bw=10, bh=5):
     p.img[ys, xs] = out
 
 
-def flow_bands(p, B, m, cs, seed, ox=0, oy=0):
-    """roads, squares, lanes, paths and bridges as believable ground. B = cell codes of the zone plus an
-    m-cell margin from the zones round it; ox, oy = the zone's top-left in world pixels."""
+def _dist(lines, H, W, reach):
+    """distance (pixels) from every pixel to the nearest of the polylines, out to `reach`"""
+    D = np.full((H, W), 1e9, np.float32)
+    for pts in lines:
+        for a, b in zip(pts[:-1], pts[1:]):
+            x0 = int(max(0, min(a[0], b[0]) - reach)); x1 = int(min(W, max(a[0], b[0]) + reach + 1))
+            y0 = int(max(0, min(a[1], b[1]) - reach)); y1 = int(min(H, max(a[1], b[1]) + reach + 1))
+            if x0 >= x1 or y0 >= y1:
+                continue
+            yy, xx = np.mgrid[y0:y1, x0:x1]
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            L2 = dx * dx + dy * dy or 1e-9
+            t = np.clip(((xx - a[0]) * dx + (yy - a[1]) * dy) / L2, 0, 1)
+            d = np.hypot(xx - (a[0] + t * dx), yy - (a[1] + t * dy)).astype(np.float32)
+            D[y0:y1, x0:x1] = np.minimum(D[y0:y1, x0:x1], d)
+    return D
+
+
+NO_PATH = ("mountain", "peak", "lava", "house", "volcano")
+
+
+def flow_bands(p, B, m, cs, seed, ox=0, oy=0, roads=(), trails=()):
+    """roads and footpaths along their real routes (a defined worn middle, edges that fray and fade into
+    the land), plus cobbled squares and brick lanes in towns. B = cell codes of the zone plus an m-cell
+    margin; ox, oy = the zone's top-left in world pixels; roads/trails = centre lines in zone pixels."""
     rng = np.random.default_rng(seed)
     H, W = p.img.shape
     g = rng.random((H, W))
+    g2 = rng.random((H, W))
     big = _clumpy((H, W), rng, 26)
     small = _clumpy((H, W), rng, 6)
-    cellwater = np.isin(B[m:m + cs, m:m + cs], list(WATER) + ["bridge"])
-    water = np.repeat(np.repeat(cellwater, TS, 0), TS, 1)
-    ragged = (small - 0.5) * 0.11 + (g - 0.5) * 0.035   # broken edges, never a clean line
-    rd = _up(_blur(np.isin(B, ROADLIKE).astype(float)), m, cs)
-    band = (rd + ragged > 0.26)
-    town = _up(_blur(_blur(np.isin(B, ["plaza", "house", "bonfire"]).astype(float))), m, cs) > 0.05
-    square = _up(_blur(np.isin(B, ["plaza", "bonfire"]).astype(float)), m, cs) + ragged > 0.3
-    dirtshades = np.array([F("dirt", k) for k in range(NS)])
-
-    # dust spilling onto the ground beside roads and paths
-    tr = _up(_blur((B == "trail").astype(float)), m, cs)
-    spill = (((rd + ragged > 0.19) & ~band) | ((tr + ragged > 0.17) & (tr + ragged <= 0.24))) & ~water & (g < 0.45)
-    p.img[spill] = dirtshades[np.where(g[spill] < 0.15, 1, 2)]
-
-    # dirt roads: blotchy dust in several tones, wheel ruts, pebbles, puddles
-    dirt = band & ~water & ~town
+    up = lambda cells: np.repeat(np.repeat(cells, TS, 0), TS, 1)
+    inner = B[m:m + cs, m:m + cs]
+    water = up(np.isin(inner, list(WATER) + ["bridge"]))
+    blocked = up(np.isin(inner, NO_PATH))
+    dirt = np.array([F("dirt", k) for k in range(NS)])
     v = big * 0.55 + small * 0.3 + g * 0.3
-    p.img[dirt] = dirtshades[np.clip((v[dirt] * 4.2).astype(int), 1, 5)]
-    rut = dirt & (np.abs(rd - 0.335) < 0.011) & (g > 0.12)
-    p.img[rut] = dirtshades[np.where(g[rut] > 0.6, 0, 1)]
-    pud = dirt & (big > 0.74) & (small > 0.52)                 # wet mud, with a dull glint on its near edge
-    p.img[pud] = dirtshades[0]
-    rim = pud & ~np.roll(pud, 1, 0)
-    p.img[rim] = F("cobble", 3)
+    wob = (small - 0.5) * 7 + (g - 0.5) * 2.5            # the edge wanders a little, pixel by pixel
 
-    # footpaths: narrow, scruffy
-    path = (tr + ragged > 0.24) & ~band & ~water
-    p.img[path] = dirtshades[np.clip((v[path] * 3.4).astype(int), 1, 3)]
+    # footpaths: a narrow worn line, scuffed edges
+    if len(trails):
+        D = _dist(trails, H, W, 16) + wob
+        core = (D < 4.5) & ~water & ~blocked
+        fade = np.clip(1 - (D - 4.5) / 10, 0, 1)
+        scuff = ~core & (g2 < fade * 0.5) & ~water & ~blocked
+        p.img[scuff] = dirt[1]
+        p.img[core] = dirt[np.clip((v[core] * 2.6).astype(int), 1, 2)]
+        pk = core & (g2 > 0.997)
+        p.img[pk] = F("cobble", 3)
 
-    # town: cobbled squares, brick lanes, both a bit broken
+    # roads: wider, two wheel ruts, puddles, dust thinning out on both sides
+    if len(roads):
+        D0 = _dist(roads, H, W, 34)
+        D = D0 + wob
+        core = (D < 14) & ~blocked
+        fade = np.clip(1 - (D - 14) / 16, 0, 1)
+        spill = ~core & (g2 < fade * 0.55) & ~water & ~blocked
+        p.img[spill] = dirt[np.where(g[spill] < 0.4, 1, 2)]
+        land = core & ~water
+        p.img[land] = dirt[np.clip((v[land] * 3.4).astype(int), 1, 3)]
+        rut = land & (np.abs(D0 - 6.5) < 1.2) & (g > 0.15)
+        p.img[rut] = dirt[np.where(g[rut] > 0.6, 0, 1)]
+        pud = land & (big > 0.76) & (small > 0.55)
+        p.img[pud] = dirt[0]
+        p.img[pud & ~np.roll(pud, 1, 0)] = F("cobble", 2)
+        _bridge(p, core & water, ox, oy, seed)
+        for msk, dens in ((land, 0.003),):
+            ys, xs = np.nonzero(msk)
+            if len(ys):
+                k = rng.choice(len(ys), int(len(ys) * dens) + 1)
+                for dy, dx, col in ((1, 1, F("dirt", 0)), (0, 0, F("cobble", 4)), (0, 1, F("cobble", 3))):
+                    p.img[np.clip(ys[k] + dy, 0, H - 1), np.clip(xs[k] + dx, 0, W - 1)] = col
+
+    # towns: cobbled squares and brick lanes (from the town's cells)
+    ragged = (small - 0.5) * 0.11 + (g - 0.5) * 0.035
+    rd = _up(_blur(np.isin(B, ROADLIKE).astype(float)), m, cs)
+    town = _up(_blur(_blur(np.isin(B, ["plaza", "house", "bonfire"]).astype(float))), m, cs) > 0.05
+    band = (rd + ragged > 0.26) & town
+    square = _up(_blur(np.isin(B, ["plaza", "bonfire"]).astype(float)), m, cs) + ragged > 0.3
+    edge = (rd + ragged > 0.19) & ~band & town & ~water & (g2 < 0.4)
+    p.img[edge] = dirt[np.where(g[edge] < 0.4, 1, 2)]
     _cobbles(p, band & square & ~water, ox, oy, seed)
-    lane = band & town & ~square & ~water
+    lane = band & ~square & ~water
     _bricks(p, lane, ox, oy, seed)
     broken = lane & (small > 0.72) & (big > 0.5)
-    p.img[broken] = dirtshades[np.clip((v[broken] * 4).astype(int), 1, 4)]
-
-    # pebbles scattered on dirt and paths, each with a pixel of shadow
-    for msk, dens in ((dirt, 0.004), (path, 0.003), (broken, 0.006)):
-        ys, xs = np.nonzero(msk)
-        if len(ys):
-            k = rng.choice(len(ys), int(len(ys) * dens) + 1)
-            for dy, dx, col in ((1, 1, F("dirt", 0)), (0, 0, F("cobble", 5)), (0, 1, F("cobble", 4)), (1, 0, F("cobble", 4))):
-                yy, xx = np.clip(ys[k] + dy, 0, H - 1), np.clip(xs[k] + dx, 0, W - 1)
-                p.img[yy, xx] = col
-
-    # bridges: boards with gaps and knots
-    planks = band & water
-    _bridge(p, planks, ox, oy, seed)
+    p.img[broken] = dirt[np.clip((v[broken] * 3).astype(int), 1, 3)]
+    _bridge(p, band & water, ox, oy, seed)
 
 
 def _bridge(p, planks, ox, oy, seed):

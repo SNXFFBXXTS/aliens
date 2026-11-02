@@ -48,6 +48,28 @@ class ShowcaseWorld(rl.World):
     def spawn_in(self, b, cx, cy):
         return []
 
+    def showcase_trails(self, cx):
+        """a footpath wandering along beside the road, wiggling off into each zone"""
+        out = []
+        for k in (-1, 0, 1):
+            x = cx + k
+            if 0 <= x < len(ZONES):
+                u = np.linspace(0, 1, 61)
+                px = x + u
+                py = Y0 + (31 + 4 * np.sin(px * 5.1) + 2 * np.sin(px * 13.7 + 1)) / CS
+                out.append(np.stack([px, py], 1))
+        return out
+
+    def lines(self, cx, cy):
+        if cy != Y0:
+            return [], []
+        xs = np.arange(cx * CS - 6, cx * CS + CS + 7)
+        road = np.stack([(xs + 0.5) / CS, Y0 + (20 + np.round(2 * np.sin(xs / 9)) + 0.5) / CS], 1)
+        # smooth the stair-steps of the cell road into a flowing line
+        for _ in range(3):
+            road[1:-1, 1] = 0.25 * road[:-2, 1] + 0.5 * road[1:-1, 1] + 0.25 * road[2:, 1]
+        return [road], self.showcase_trails(cx)
+
     def generate(self, cx, cy):
         if cy != Y0 or not 0 <= cx < len(ZONES):
             return np.full((CS, CS), "deep", dtype="<U10")
@@ -86,9 +108,7 @@ class ShowcaseWorld(rl.World):
             b[np.abs(i - rx) <= 1] = "river"
         elif kind == "icesheet":
             b[n2 > 0.66] = "drift"
-        trail = np.abs(proto.fbm(X / 0.9, Y / 0.9, 3, 4302) - 0.5) < 0.0065
-        b[trail & np.isin(b, ["grass", "meadow", "savanna", "forest", "jungle", "hills", "taiga", "tundra", "desert",
-                              "badlands", "fungal", "swamp", "beach", "ash"])] = "trail"
+        proto.mark_trails(b, cx, Y0, CS, CS, self.showcase_trails(cx))
         # soft borders: the edge of the zone before bleeds in
         if cx > 0:
             prev = base_of(ZONES[cx - 1][0])

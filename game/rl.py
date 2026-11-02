@@ -125,6 +125,11 @@ class World:
     def spawn_in(self, b, cx, cy):
         return mobs.spawn(self.best, b, cx, cy, CS, self.tier(cx, cy), self.seed)
 
+    def lines(self, cx, cy):
+        """centre lines (world coords) of the roads and footpaths near zone (cx, cy)"""
+        box = (cx - 0.3, cy - 0.3, cx + 1.3, cy + 1.3)
+        return proto.road_lines(self.wd, *box), proto.trail_lines(self.wd, *box)
+
     def write_chunk(self, cx, cy):
         p = self.path(cx, cy)
         here = [m.to_json() for m in self.mobs.values() if m.x // CS == cx and m.y // CS == cy]
@@ -188,8 +193,10 @@ class World:
                         weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing")
                 else:
                     weird.paint(p, self.species, x, y, c, R[y, x], defer=items)
+        roads, trails = self.lines(cx, cy)
+        to_px = lambda L: [(pts - (cx, cy)) * CS * weird.TS for pts in L]
         weird.flow_bands(p, B, M, CS, (cx * 7919 + cy * 104729 + self.seed) & 0xFFFFFFFF,
-                         ox=cx * CS * weird.TS, oy=cy * CS * weird.TS)
+                         ox=cx * CS * weird.TS, oy=cy * CS * weird.TS, roads=to_px(roads), trails=to_px(trails))
         # big things from the zones next door that lean over the border: their shadows (and rocks/peaks) belong here too
         nb = []
         for y in range(-1, CS + 3):
