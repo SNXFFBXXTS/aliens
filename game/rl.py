@@ -24,6 +24,7 @@ sys.path.insert(0, HERE)
 import proto                                           # noqa: E402
 import weird                                           # noqa: E402
 import mobs                                            # noqa: E402
+import immersion as im                                 # noqa: E402
 from weird_proto import world8                         # noqa: E402
 from art import P, B, T, Painter                       # noqa: E402
 
@@ -56,6 +57,7 @@ class World:
         self.best = mobs.Bestiary(seed)
         self.codes, self.surf = {}, {}
         self.mobs = {}                          # id -> Mob, for every loaded chunk
+        self.seen = {}                          # chunk -> bool array of cells you've laid eyes on
         self.dead = set()
         self.visited = {tuple(map(int, f[:-5].split("_"))) for f in os.listdir(os.path.join(self.dir, "chunks")) if f.endswith(".json")}
         self.map_img = None
@@ -84,6 +86,8 @@ class World:
             if isinstance(d, list):                                 # older save without creatures
                 d = {"cells": d, "mobs": None}
             b = np.array(d["cells"], dtype="<U10")
+            if d.get("seen"):
+                self.seen[k] = np.array([[(row >> i) & 1 for i in range(CS)] for row in d["seen"]], bool)
             if d.get("mobs") is None:
                 new_mobs = mobs.spawn(self.best, b, cx, cy, CS, self.tier(cx, cy), self.seed)
                 fresh = True
@@ -97,6 +101,7 @@ class World:
         else:
             b = np.full((CS, CS), "deep", dtype="<U10")             # off the edge of the world
         self.codes[k] = b
+        self.seen.setdefault(k, np.zeros((CS, CS), bool))
         for m in new_mobs:
             if m.id not in self.dead:
                 self.mobs[m.id] = m
@@ -108,7 +113,8 @@ class World:
         p = self.path(cx, cy)
         here = [m.to_json() for m in self.mobs.values() if m.x // CS == cx and m.y // CS == cy]
         with open(p + ".tmp", "w") as f:
-            json.dump({"cells": self.codes[(cx, cy)].tolist(), "mobs": here}, f)
+            seen = [int(sum(1 << i for i in range(CS) if row[i])) for row in self.seen[(cx, cy)]]
+            json.dump({"cells": self.codes[(cx, cy)].tolist(), "mobs": here, "seen": seen}, f)
         os.replace(p + ".tmp", p)
 
     def save(self):
@@ -125,6 +131,15 @@ class World:
             if m.x == x and m.y == y:
                 return m
         return None
+
+    def remember(self, cells):
+        for (x, y) in cells:
+            self.chunk(x // CS, y // CS)
+            self.seen[(x // CS, y // CS)][y % CS, x % CS] = True
+
+    def was_seen(self, x, y):
+        a = self.seen.get((x // CS, y // CS))
+        return a is not None and a[y % CS, x % CS]
 
     def surface(self, cx, cy):
         """the chunk drawn once as palette indices; colours come from the (cycling) palette at draw time"""
@@ -165,6 +180,10 @@ class Game:
         self.t0 = time.monotonic()
         self.last_save = time.monotonic()
         self.hero = self.make_hero()
+        self.amb = im.Ambience()
+        self.vis = set()
+        self.dark = None                    # cached darkness overlay
+        self.last_desc = {}
         self.mob_img = {}
         self.flash = {}                     # mob id / "you" -> time of last hit
         self.dead = False
@@ -186,6 +205,7 @@ class Game:
             self.hp = self.maxhp
             self.say("You arrive in a small town. Strange things live out there: walk into them to fight.")
         self.here = self.w.cell(self.px, self.py)
+        self.update_view()
         for i in self.w.dead:
             self.w.mobs.pop(i, None)
 
@@ -275,7 +295,10 @@ class Game:
             if c in ("shallow", "lake", "river"):
                 self.say("You wade through the " + nm.lower() + ".")
             elif c not in ("road", "bridge", "plaza") or self.here not in ("road", "bridge", "plaza"):
-                self.say(nm + ".")
+                d = im.describe(c) if self.turn - self.last_desc.get(c, -9999) > 150 else None
+                if d:
+                    self.last_desc[c] = self.turn
+                self.say(nm + ". " + d if d else nm + ".")
             self.here = c
         if len(self.w.visited) > before and random.random() < 0.15:
             self.say("New land: you're the first to walk here.")
@@ -292,22 +315,26 @@ class Game:
             self.say(f"The {m.name} turns on you!")
         if random.random() > hit:
             self.say(f"You miss the {m.name}.")
+            self.amb.fx("miss")
             return
         d = max(1, random.randint(2, 5) + self.lvl - 1 - m.sp.defn)
         m.hp -= d
         self.flash[m.id] = time.monotonic()
+        self.amb.fx("hit")
         if m.hp <= 0:
             self.w.mobs.pop(m.id, None)
             self.w.dead.add(m.id)
             gain = 4 + m.tier * 6 + m.maxhp // 3
             self.xp += gain
             self.say(f"You kill the {m.name}. (+{gain} xp)")
+            self.amb.fx("kill", 0.7)
             while self.xp >= self.lvl * 25:
                 self.xp -= self.lvl * 25
                 self.lvl += 1
                 self.maxhp += 6
                 self.hp = self.maxhp
                 self.say(f"You feel stronger: level {self.lvl}! Fully healed.")
+                self.amb.fx("level")
         else:
             self.say(f"You hit the {m.name} for {d}.")
 
@@ -319,7 +346,7 @@ class Game:
             dist = max(abs(m.x - self.px), abs(m.y - self.py))
             if dist > ACTIVE:
                 continue
-            if not m.seen and dist <= 9:
+            if not m.seen and (m.x, m.y) in self.vis:
                 m.seen = True
                 self.say(f"You see a {m.name}." + (" It looks hostile." if m.angry else ""))
             if m.sp.slow and self.turn % 2:
@@ -345,6 +372,21 @@ class Game:
                 occupied.add(target)
         if not near_hostile and self.turn % 8 == 0 and self.hp < self.maxhp:
             self.hp += 1
+        self.update_view()
+
+    def update_view(self):
+        """what you can see from here, at this time of day"""
+        day, phase, r, tint = im.daytime(self.turn)
+        r = min(r, im.THICK.get(self.here, 99))
+        self.radius = r
+        self.vis = im.fov(self.px, self.py, r, self.w.cell)
+        self.w.remember(self.vis)
+        self.dark = None
+        self.amb.area(self.here, phase == "Night")
+        if phase != getattr(self, "phase", phase):
+            self.say({"Dawn": "The sky pales. Dawn.", "Day": "Full daylight.", "Dusk": "The light goes amber, then violet. Dusk.",
+                      "Night": "Night falls. You can barely see past your hands."}[phase])
+        self.phase = phase
 
     def hurt_by(self, m):
         if random.random() > 0.7:
@@ -354,6 +396,7 @@ class Game:
         d = random.randint(lo, hi)
         self.hp -= d
         self.flash["you"] = time.monotonic()
+        self.amb.fx("hurt")
         verb = {"legs": "bites", "wings": "stings", "blob": "burns", "tall": "claws", "tentacle": "lashes",
                 "beast": "mauls", "fish": "bites"}.get(m.sp.plan, "hits")
         self.say(f"The {m.name} {verb} you for {d}.")
@@ -368,6 +411,7 @@ class Game:
         self.hp = self.maxhp
         self.px, self.py = self.start_spot()
         self.here = self.w.cell(self.px, self.py)
+        self.update_view()
         self.say("You wake up back in town, aching all over. (You lost your xp towards the next level.)")
         self.save()
 
@@ -387,6 +431,8 @@ class Game:
                      pygame.K_KP7: (-1, -1), pygame.K_KP9: (1, -1), pygame.K_KP1: (-1, 1), pygame.K_KP3: (1, 1)}
             if k in moves:
                 self.act(*moves[k])
+            elif k == pygame.K_n:
+                self.say("Sound on." if self.amb.toggle() else "Sound off.")
             elif k == pygame.K_m:
                 self.show_map = not self.show_map
                 if self.show_map:
@@ -425,7 +471,7 @@ class Game:
                 self.screen.blit(srf, (cx * CS * PX - cxp, cy * CS * PX - cyp + HUD_H))
         for m in self.w.mobs.values():
             x, y = m.x * PX - cxp, m.y * PX - cyp + HUD_H
-            if -PX < x < sw and HUD_H - PX < y < HUD_H + vh:
+            if (m.x, m.y) in self.vis and -PX < x < sw and HUD_H - PX < y < HUD_H + vh:
                 pygame.draw.rect(self.screen, (0, 0, 0), (x + 2, y + 2, PX - 4, PX - 4))
                 spr = self.mob_sprite(m)
                 if now - self.flash.get(m.id, 0) < 0.15:
@@ -434,6 +480,7 @@ class Game:
                 if m.hp < m.maxhp:
                     pygame.draw.rect(self.screen, (60, 0, 0), (x + 3, y - 3, PX - 6, 3))
                     pygame.draw.rect(self.screen, (230, 50, 50), (x + 3, y - 3, int((PX - 6) * m.hp / m.maxhp), 3))
+        self.screen.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), HUD_H - (cyp % PX)))
         hx, hy = self.px * PX - cxp, self.py * PX - cyp + HUD_H
         pygame.draw.rect(self.screen, (0, 0, 0), (hx + 2, hy + 2, PX - 4, PX - 4))
         self.screen.blit(self.hero, (hx, hy))
@@ -442,6 +489,31 @@ class Game:
             ov = pygame.Surface((sw, vh), pygame.SRCALPHA)
             ov.fill((200, 0, 0, 60))
             self.screen.blit(ov, (0, HUD_H))
+
+    def darkness(self, cxp, cyp, sw, vh):
+        """black where you've never looked, dim where you remember, a soft falloff and the time-of-day tint where you see"""
+        key = (cxp, cyp, sw, vh, self.turn, self.px, self.py)
+        if self.dark and self.dark[0] == key:
+            return self.dark[1]
+        x0, y0 = cxp // PX, cyp // PX
+        cols, rows = sw // PX + 2, vh // PX + 2
+        _, _, _, tint = im.daytime(self.turn)
+        a = np.zeros((rows, cols, 4), np.uint8)
+        r = max(1, self.radius)
+        for j in range(rows):
+            for i in range(cols):
+                gx, gy = x0 + i, y0 + j
+                if (gx, gy) in self.vis:
+                    d2 = ((gx - self.px) ** 2 + (gy - self.py) ** 2) / (r * r)
+                    a[j, i] = (tint[0], tint[1], tint[2], min(235, int(tint[3] + d2 * 120)))
+                elif self.w.was_seen(gx, gy):
+                    a[j, i] = (2, 2, 8, 218)
+                else:
+                    a[j, i] = (0, 0, 0, 255)
+        srf = pygame.image.frombuffer(a.tobytes(), (cols, rows), "RGBA")
+        srf = pygame.transform.scale(srf, (cols * PX, rows * PX))
+        self.dark = (key, srf)
+        return srf
 
     def draw_map(self):
         sw, sh = self.screen.get_size()
@@ -476,14 +548,15 @@ class Game:
         pygame.draw.rect(self.screen, (220, 50, 60), (bx, 8, int(160 * self.hp / self.maxhp), 14))
         self.screen.blit(self.small.render(f"HP {self.hp}/{self.maxhp}", True, (255, 255, 255)), (bx + 6, 7))
         danger = 1 + self.w.tier(self.px // CS, self.py // CS)
-        info = f"Level {self.lvl}   XP {self.xp}/{self.lvl * 25}   Turn {self.turn}   Danger " + "*" * danger
+        day, phase, _, _ = im.daytime(self.turn)
+        info = f"Level {self.lvl}   XP {self.xp}/{self.lvl * 25}   Day {day}, {phase}   Danger " + "*" * danger
         self.screen.blit(self.font.render(info, True, (190, 190, 200)), (bx + 175, 5))
         expl = self.font.render(f"Explored {len(self.w.visited)}   Seed {self.w.seed}", True, (110, 110, 120))
         self.screen.blit(expl, (sw - expl.get_width() - 10, 6))
         for n, msg in enumerate(self.msgs):
             col = (225, 225, 225) if n == len(self.msgs) - 1 else (125, 125, 135)
             self.screen.blit(self.font.render(msg, True, col), (10, sh - LOG_H + 2 + n * 19))
-        keys = self.small.render("Move/attack: arrows WASD numpad   . wait   M map   Esc save & quit", True, (100, 100, 110))
+        keys = self.small.render("Move/attack: arrows WASD numpad   . wait   M map   N sound   Esc save & quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
 
     def draw_death(self):
