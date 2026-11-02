@@ -225,8 +225,7 @@ class World:
         self.feats[k] = feats
         s = pygame.image.frombuffer(p.img.tobytes(), (CS * weird.TS, CS * weird.TS), "P")
         s.set_palette([tuple(c) for c in weird.palette(0)])
-        n = CS * PX
-        s = pygame.transform.scale(pygame.transform.scale(s, (n // weird.PIX, n // weird.PIX)), (n, n))   # crunch
+        s = pygame.transform.scale(s, (CS * PX, CS * PX))
         if len(self.surf) > 40:
             self.surf.clear()
         self.surf[k] = s
@@ -677,11 +676,8 @@ class Game:
         return self.live_cache[key]
 
     def crunch(self, srf):
-        """same chunky pixels as the ground"""
-        w, h = srf.get_size()
-        q = weird.PIX
-        small = pygame.transform.scale(srf, (max(1, w // q), max(1, h // q)))
-        return pygame.transform.scale(small, (w, h)).convert_alpha()
+        """(was: chunky pixels; trees and grass stay crisp, only paths are crunched now)"""
+        return srf.convert_alpha()
 
     def glow_frames(self):
         if not hasattr(self, "_glow"):
