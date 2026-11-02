@@ -61,9 +61,9 @@ for _f in range(len(FAM_DEF)):
         SHADE[_i] = 0 if _k <= 1 else 8 + _f * NS + max(0, _k - 3)
 
 
-def palette(t=0.0):
+def palette(t=0.0, trip=0):
     pal = np.zeros((256, 3), np.uint8)
-    for f in FAMS:
+    for fi, f in enumerate(FAMS):
         r = BASE[f]
         for k in range(NS):
             c = r[k]
@@ -76,6 +76,11 @@ def palette(t=0.0):
                 c = np.array(colorsys.hls_to_rgb(h, l, s)) * 255
             elif f in ("lumen", "bog") and k >= 4:                  # breathing glow, slow
                 c = c * (0.9 + 0.1 * math.sin(t * 0.35 + k))
+            if trip and f not in ("dirt", "cobble", "clay", "wood"):   # acid: every colour family wanders round
+                h, l, s_ = colorsys.rgb_to_hls(*(np.clip(c, 0, 255) / 255))  # the wheel at its own pace
+                h = (h + trip * 0.07 * math.sin(t * 0.09 + fi * 0.9) + trip * 0.03 * math.sin(t * 0.031 + fi)) % 1
+                s_ = min(1.0, s_ * (1 + 0.22 * trip))
+                c = np.array(colorsys.hls_to_rgb(h, l, s_)) * 255
             pal[F(f, k)] = np.clip(c, 0, 255)
     return pal
 

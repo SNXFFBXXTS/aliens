@@ -13,7 +13,7 @@ The world is split into chunks (one world-map tile = 12 x 12 cells). A chunk is 
 it comes near you, then written to disk with the creatures living there, so it never changes after that.
 Saves: ~/.local/share/roguelike/
 """
-import json, os, random, sys, time, warnings
+import json, math, os, random, sys, time, warnings
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 warnings.filterwarnings("ignore", message=".*avx2.*")
 import numpy as np
@@ -610,6 +610,84 @@ class Game:
             self.last_step = now
             self.act(*d)
 
+    WHISPERS = ["IT SEES YOU.", "the trees are breathing.", "you have been here before.", "don't look behind you.",
+                "your hands are not your hands.", "the ground is listening.", "something is wearing the sky.",
+                "count your fingers.", "THE STARS ARE WRONG.", "you were never alone out here.", "it remembers your name.",
+                "the colours are louder now.", "wake up."]
+
+    def acid(self, t, now, w, h):
+        """post effects on the view: ghost trails, colour split, melting waves, glitches, the eye"""
+        lvl = getattr(self, "trip", 2)
+        if lvl == 0:
+            self._ghost = None
+            return
+        view = self.screen.subsurface((0, HUD_H, w, h))
+        if random.random() < 0.0009 * lvl and now > getattr(self, "_eye_until", 0) + 8:   # something watches
+            self._eye = (random.randint(80, w - 80), random.randint(60, h - 60), now, random.choice([60, 90, 140]))
+            self._eye_until = now + 2.2
+        if now < getattr(self, "_eye_until", 0):
+            self.draw_eye(view, now)
+        g = getattr(self, "_ghost", None)
+        if g is not None and g.get_size() == (w, h):              # trails: the last frame lingers
+            g.set_alpha((0, 55, 85, 115)[lvl])
+            view.blit(g, (0, 0))
+        src = view.copy()
+        A = (0, 2.0, 3.5, 6.0)[lvl]                                 # melting: strips of rows slide in slow waves
+        band = 3
+        view.fill((0, 0, 0))
+        for y in range(0, h, band):
+            sh = int(A * math.sin(y * 0.035 + t * 1.1) + A * 0.6 * math.sin(y * 0.11 - t * 1.9))
+            view.blit(src, (sh, y), (0, y, w, band))
+        k = (0, 2, 3, 5)[lvl] + int(round(1.5 * math.sin(t * 0.7)))
+        if k > 0:                                                   # colour split: red one way, blue the other
+            r_ = pygame.surfarray.pixels_red(view)
+            r_[k:] = r_[:-k].copy()
+            del r_
+            b_ = pygame.surfarray.pixels_blue(view)
+            b_[:-k] = b_[k:].copy()
+            del b_
+        if random.random() < 0.0015 * lvl and now > getattr(self, "_glitch_until", 0) + 3:
+            self._glitch_until = now + random.uniform(0.12, 0.35)
+            self._glitch = random.choice(["tear", "invert", "tear", "burn"])
+            if random.random() < 0.35:
+                self.say(random.choice(self.WHISPERS))
+        if now < getattr(self, "_glitch_until", 0):                 # hallucination
+            kind = self._glitch
+            src = view.copy()
+            for _ in range(random.randint(3, 8)):
+                y0 = random.randint(0, h - 20); bh = random.randint(4, 40)
+                if kind == "tear":
+                    view.blit(src, (random.randint(-80, 80), y0), (0, y0, w, bh))
+                elif kind == "invert":
+                    view.fill((255, 255, 255), (0, y0, w, bh), special_flags=pygame.BLEND_RGB_SUB)
+                    view.blit(src, (0, y0), (0, y0, w, bh), special_flags=pygame.BLEND_RGB_SUB)
+                    sub = view.subsurface((0, y0, w, min(bh, h - y0)))
+                    inv = pygame.Surface(sub.get_size()); inv.fill((255, 255, 255))
+                    inv.blit(src, (0, 0), (0, y0, w, bh), special_flags=pygame.BLEND_RGB_SUB)
+                    sub.blit(inv, (0, 0))
+                else:
+                    view.fill(random.choice([(255, 0, 60), (0, 255, 200), (255, 220, 0)]), (0, y0, w, bh),
+                              special_flags=pygame.BLEND_RGB_ADD)
+        self._ghost = view.copy()
+
+    def draw_eye(self, view, now):
+        """a huge eye opens at the edge of the dark, stares at you, blinks, fades"""
+        ex, ey, t0, r = self._eye
+        u = (now - t0) / 2.2
+        open_ = math.sin(min(1, u) * math.pi)                       # opens then closes
+        if 0.45 < u < 0.52:
+            open_ *= 0.1                                            # blink
+        hh = max(2, int(r * 0.55 * open_))
+        s = pygame.Surface((r * 2 + 4, r * 2 + 4), pygame.SRCALPHA)
+        c = (r + 2, r + 2)
+        a = int(200 * open_)
+        pygame.draw.ellipse(s, (235, 230, 210, a), (2, c[1] - hh, r * 2, hh * 2))
+        hx = (self.px * PX - ex) * 0.0                               # it looks at you
+        pygame.draw.circle(s, (random.choice([180, 200]), 40, 160, a), c, int(r * 0.38))
+        pygame.draw.circle(s, (5, 0, 10, a), c, int(r * 0.18))
+        pygame.draw.circle(s, (255, 255, 255, a), (c[0] - r // 8, c[1] - r // 8), max(2, r // 14))
+        view.blit(s, (ex - c[0], ey - c[1]))
+
     def set_zoom(self, d):
         self.zoom = max(0, min(len(self.ZOOMS) - 1, getattr(self, "zoom", 2) + d))
         self.dark = None
@@ -642,6 +720,10 @@ class Game:
                 self.hold = (k, moves[k], time.monotonic())
             elif k in (pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_MINUS, pygame.K_MINUS):
                 self.set_zoom(+1 if k in (pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_PLUS) else -1)
+            elif k == pygame.K_t:
+                self.trip = (getattr(self, "trip", 2) + 1) % 4
+                self.say(["Trip off. Everything is ordinary. Suspiciously ordinary.", "Trip: mild.", "Trip: strong.",
+                          "Trip: full send."][self.trip])
             elif k == pygame.K_n:
                 self.say("Sound on." if self.amb.toggle() else "Sound off.")
             elif k == pygame.K_m:
@@ -685,7 +767,7 @@ class Game:
         c0x, c0y = cxp // (CS * PX), cyp // (CS * PX)
         c1x, c1y = (cxp + sw) // (CS * PX), (cyp + vh) // (CS * PX)
         S.set_clip(pygame.Rect(0, top, sw, vh))
-        pal = [tuple(c) for c in weird.palette(t)]          # the trippy bit: colours cycle every frame
+        pal = [tuple(c) for c in weird.palette(t, getattr(self, "trip", 2))]   # colours cycle every frame
         for cy in range(c0y, c1y + 1):
             for cx in range(c0x, c1x + 1):
                 srf = self.w.surface(cx, cy)
@@ -715,6 +797,7 @@ class Game:
         if S is not self.screen:
             scale = pygame.transform.scale if z > 1 else pygame.transform.smoothscale
             self.screen.blit(scale(S, (SW, VH)), (0, HUD_H))
+        self.acid(t, now, SW, VH)
         if now - self.flash.get("you", 0) < 0.2:           # red flash when you're hurt
             ov = pygame.Surface((SW, VH), pygame.SRCALPHA)
             ov.fill((200, 0, 0, 60))
@@ -847,7 +930,7 @@ class Game:
         for n, msg in enumerate(self.msgs):
             col = (225, 225, 225) if n == len(self.msgs) - 1 else (125, 125, 135)
             self.screen.blit(self.font.render(msg, True, col), (10, sh - LOG_H + 2 + n * 19))
-        keys = self.small.render("Move: arrows WASD numpad   . wait   numpad +/- zoom   M map   N sound   Esc save & quit", True, (100, 100, 110))
+        keys = self.small.render("Move: arrows WASD numpad   . wait   +/- zoom   T trip   M map   N sound   Esc save & quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
 
     def draw_death(self):
