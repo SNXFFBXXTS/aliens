@@ -129,6 +129,10 @@ class World:
     def spawn_in(self, b, cx, cy):
         return mobs.spawn(self.best, b, cx, cy, CS, self.tier(cx, cy), self.seed)
 
+    def density(self, cx, cy):
+        """how thickly things grow in a zone (the showcase alternates busy and barren)"""
+        return 1.0
+
     def lines(self, cx, cy):
         """centre lines (world coords) of the roads and footpaths near zone (cx, cy)"""
         box = (cx - 0.3, cy - 0.3, cx + 1.3, cy + 1.3)
@@ -197,6 +201,7 @@ class World:
         zseed = (cx * 7919 + cy * 104729 + self.seed) & 0xFFFFFFFF
         weird.ground_pass(p, G, M, CS, zseed, cx * CS * weird.TS, cy * CS * weird.TS)
         items = []
+        dens = self.density(cx, cy)
         for y in range(CS):
             for x in range(CS):
                 c = b[y, x]
@@ -209,7 +214,7 @@ class World:
                 elif c in UNDER and c not in ("house", "bonfire"):
                     continue
                 else:                              # trees, plants, props: the ground is already down
-                    weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing")
+                    weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing", mult=dens)
         roads, trails = self.lines(cx, cy)
         to_px = lambda L: [(pts - (cx, cy)) * CS * weird.TS for pts in L]
         weird.flow_bands(p, B, M, CS, zseed,

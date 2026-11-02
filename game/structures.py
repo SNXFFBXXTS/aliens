@@ -754,3 +754,6 @@ def describe(wd, cx, cy):
         return None
     d = L[hit[0]]
     return f"You come across {d['title']}. {d['desc']}"
+
+
+import cultures  # noqa: E402,F401  (Aztec / Egyptian / Soviet / rural / alien ruins and relics register themselves)

@@ -864,11 +864,11 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
         c[(o == 11) | (o == 23)] = F("cobble", 1)
 
 
-def paint(p, sp, x, y, b, r, local=True, defer=None, mode="full"):
+def paint(p, sp, x, y, b, r, local=True, defer=None, mode="full", mult=1.0):
     """b = biome code, r = per-cell random numbers (0..1). With a defer list, big/live things are queued
     there to be drawn after all the ground is down. mode: "full", "ground" (no plants/things) or "thing" (only them)."""
     if mode == "thing":
-        hit = pick(sp, b, r, local)
+        hit = pick(sp, b, r, local, mult)
         if hit and defer is not None:
             defer.append((hit[0], x, y) + hit[1:])
         return
@@ -927,7 +927,7 @@ def paint(p, sp, x, y, b, r, local=True, defer=None, mode="full"):
     p.sprite(x, y, spr, m, dx=dx)
 
 
-def pick(sp, b, r, local=True):
+def pick(sp, b, r, local=True, mult=1.0):
     """what grows or stands in this cell: (kind, sprite, colours, dx, big) or None. Pure: the same cell always
     gives the same answer, so neighbouring zones can ask about each other's border cells."""
     if b in WATER or b in ("seaice", "lava", "bridge"):
@@ -947,12 +947,18 @@ def pick(sp, b, r, local=True):
     roll = rr(5)
     for kind, dens in kinds:
         if local:
-            dens *= THIN.get(kind, 0.32)
+            dens *= (1.0 if kind.startswith("p_") else THIN.get(kind, 0.32)) * mult
         else:
             dens = 1.0
-            if kind in ("tuft", "fire"):
+            if kind in ("tuft", "fire") or kind.startswith("p_"):
                 continue
         if roll < dens:
+            if kind.startswith("p_"):                             # a relic lying out in the land
+                m = PROP_COLOURS.get(kind)
+                if not m:
+                    return None
+                big = BIG.get(kind, RES) > RES
+                return (kind, sp.get(b, kind, pk(6, 3), big=big), m, pk(7, 9) - 4, big)
             m = {"1": F(fam, 4), "2": F(fam, 2), "3": F(acc, 5) if acc else F(fam, 5)}
             if kind == "fire":
                 return ("fire", None, m, 0, False)

@@ -50,6 +50,24 @@ class ShowcaseWorld(rl.World):
     def spawn_in(self, b, cx, cy):
         return []
 
+    def density(self, cx, cy):
+        """busy, barren, busy, barren..."""
+        if self.dirname != "showcase" or cy != Y0:
+            return 1.0
+        return 2.6 if _busy(cx) else 0.08
+
+    def culture_ruins(self, b, cx):
+        """busy zones get two ruin sites from their region's culture, one each side of the road"""
+        import structures, cultures
+        base = base_of(self.zones[cx][0])
+        cul = cultures.CULTURE.get(base)
+        if not cul:
+            return
+        names = cultures.LAYOUTS[cul]
+        r = np.random.default_rng(cx * 31 + 7)
+        for k, near in enumerate(((13, 8), (27, 32))):
+            structures.stamp(b, names[(cx + k) % len(names)], int(r.integers(4)), bool(r.random() < 0.5), r, CS, CS, near)
+
     def showcase_trails(self, cx):
         """a footpath wandering along beside the road, wiggling off into each zone"""
         out = []
@@ -127,6 +145,8 @@ class ShowcaseWorld(rl.World):
                 b[y, x] = "bridge" if c in ("river", "lake", "shallow", "ocean") else "crust" if c == "lava" else "road"
         if kind == "town":
             self._town(b, i, j)
+        elif self.dirname == "showcase" and _busy(cx):
+            self.culture_ruins(b, cx)
         return b
 
     def _town(self, b, i, j):
@@ -146,6 +166,10 @@ class ShowcaseWorld(rl.World):
                     hx, hy = int(round(cx + ca * t - sa * side * 2)), int(round(cy + sa * t + ca * side * 2))
                     if 0 <= hx < CS and 0 <= hy < CS and b[hy, hx] not in ("road", "plaza") and rng.random() < 0.85:
                         b[hy, hx] = "house"
+
+
+def _busy(k):
+    return k % 2 == 0
 
 
 class StructureShowcase(ShowcaseWorld):
