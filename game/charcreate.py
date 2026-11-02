@@ -1,5 +1,5 @@
-"""Character creation: 20 bodies drawn from Japanese characters (given a head, coloured like clothing,
-with anchor points for hat / hands / back so they can wear and hold gear) x 10 archetypes.
+"""Character creation: each character IS a Japanese symbol (in the font), two-toned skin/clothes, with its gear
+shown as smaller symbols placed on it (hat on top, weapon at the hand, pack or coat behind) x 10 archetypes.
 
 Keys: up/down archetype, left/right body, C skin, R randomise, N new name, Enter keep, Esc quit.
 Saves the chosen character to ~/.local/share/roguelike/character.json.
@@ -212,9 +212,56 @@ def render(body, arch, skin, mut=None):
     return a
 
 
-def to_surface(a, scale):
-    s = pygame.image.frombuffer(a.tobytes(), (N, N), "RGBA").copy()
-    return pygame.transform.scale(s, (N * scale, N * scale))
+# gear drawn as symbols placed on the body symbol
+GEAR_GLYPH = {"cowboy": "笠", "cap": "帽", "cap2": "帽", "hardhat": "冑", "beanie": "帽", "hood": "巾", "goggles": "眼",
+              "circlet": "冠", "revolver": "銃", "shotgun": "砲", "derringer": "弾", "knife": "刀", "axe": "斧",
+              "scalpel": "刃", "wrench": "工", "staff": "杖", "deck": "電", "tome": "書", "duster": "衣", "pack": "包",
+              "cloak": "套", "vest": "甲", "scarf": "巾", "belt": "帯", "mutation": "変"}
+_FONTS = {}
+
+
+def cjk_font(size):
+    if size not in _FONTS:
+        _FONTS[size] = _font(CJK, size)
+    return _FONTS[size]
+
+
+def glyph(text, size, col):
+    return cjk_font(size).render(text, True, col)
+
+
+def draw_char(screen, cx, cy, size, body, arch, skin, mut=None, bob=0, sway=0.0):
+    """the character: the body symbol two-toned (skin above, clothes below), gear symbols placed on it"""
+    hat, weapon, back, extra, coat, trim = arch["look"]
+    dark = tuple(int(v * 0.55) for v in coat)
+    g_coat = glyph(body, size, coat)
+    g_skin = glyph(body, size, skin)
+    w, h = g_coat.get_size()
+    x0, y0 = cx - w // 2, cy - h // 2 + bob
+    gs = int(size * 0.42)
+    if back in ("pack", "cloak", "duster"):                    # behind the body
+        b = glyph(GEAR_GLYPH[back], int(size * 0.62), dark)
+        screen.blit(b, (x0 - int(w * 0.12) + int(sway * 3), y0 + int(h * 0.2)))
+    shadow = glyph(body, size, (0, 0, 0))
+    shadow.set_alpha(120)
+    screen.blit(shadow, (x0 + max(2, size // 40), y0 + max(2, size // 40)))
+    screen.blit(g_coat, (x0, y0))
+    cut = int(h * 0.42)                                        # the top of the symbol in skin
+    screen.blit(g_skin, (x0, y0), pygame.Rect(0, 0, w, cut))
+    if extra and extra != "mutation":
+        e = glyph(GEAR_GLYPH[extra], int(size * 0.3), trim)
+        screen.blit(e, (cx - e.get_width() // 2, y0 + int(h * (0.42 if extra != "scarf" else 0.3))))
+    if extra == "mutation" and mut:
+        m = glyph(GEAR_GLYPH["mutation"], int(size * 0.3), trim)
+        screen.blit(m, (x0 - int(w * 0.05), y0 + int(h * 0.35)))
+        if mut.startswith("Extra"):
+            screen.blit(glyph("手", int(size * 0.32), skin), (x0 - int(w * 0.18), y0 + int(h * 0.5)))
+    if hat:
+        hg = glyph(GEAR_GLYPH[hat], gs, trim if hat in ("goggles", "circlet") else coat)
+        screen.blit(hg, (cx - hg.get_width() // 2, y0 - int(hg.get_height() * 0.55)))
+    if weapon:
+        wg = glyph(GEAR_GLYPH[weapon], gs, (205, 208, 215))
+        screen.blit(wg, (x0 + int(w * 0.78) + int(sway * 2), y0 + int(h * 0.38)))
 
 
 def wrap(font, text, w):
@@ -235,7 +282,6 @@ def run(screen, root, shot=None, setup=None):
     pygame.display.set_caption("New drifter")
     big, mid, small, tiny = _font(UIB, 34), _font(UIB, 20), _font(UI, 16), _font(UI, 13)
     cjk = _font(CJK, 40)
-    bodies = [Body(g) for g, _ in BODIES]
     st = dict(arch=0, body=0, skin=1, name=f"{random.choice(FIRST)} {random.choice(LAST)}", mut=random.choice(MUTATIONS))
     cache, msg, msg_t = {}, "", 0
     clock = pygame.time.Clock()
@@ -277,11 +323,6 @@ def run(screen, root, shot=None, setup=None):
                         json.dump(d, f, indent=1, ensure_ascii=False)
                     msg, msg_t = f"{st['name']} is ready. (Preview: the game will start from here once it's built. Esc to quit.)", time.monotonic()
         a = ARCH[st["arch"]]
-        key = (st["arch"], st["body"], st["skin"], st["mut"])
-        if key not in cache:
-            mut = st["mut"] if a["name"] == "Mutant Pilgrim" else None
-            cache[key] = render(bodies[st["body"]], a, SKINS[st["skin"]][1], mut)
-        img = cache[key]
         sw, sh = screen.get_size()
         t = time.monotonic() - t0
         screen.fill((10, 9, 14))
@@ -303,27 +344,24 @@ def run(screen, root, shot=None, setup=None):
             screen.blit(tiny.render(ar["tag"], True, ar["look"][5] if on else (110, 110, 125)), (40, y + 26))
         # the character
         cx = 560
-        pygame.draw.ellipse(screen, (20, 26, 18), (cx - 150, 520, 300, 46))
-        pygame.draw.ellipse(screen, (6, 8, 6), (cx - 70, 528, 140, 22))
+        pygame.draw.ellipse(screen, (20, 26, 18), (cx - 150, 512, 300, 46))
+        pygame.draw.ellipse(screen, (6, 8, 6), (cx - 80, 520, 160, 24))
         bob = int(round(math.sin(t * 2.2) * 3))
-        screen.blit(to_surface(img, 6), (cx - N * 3, 168 + bob))
+        mut = st["mut"] if a["name"] == "Mutant Pilgrim" else None
+        draw_char(screen, cx, 390, 220, BODIES[st["body"]][0], a, SKINS[st["skin"]][1], mut, bob, math.sin(t * 1.3))
         nm = big.render(st["name"], True, (245, 240, 230))
-        screen.blit(nm, (cx - nm.get_width() // 2, 110))
+        screen.blit(nm, (cx - nm.get_width() // 2, 96))
         g, meaning = BODIES[st["body"]]
         gl = cjk.render(g, True, a["look"][5])
-        screen.blit(gl, (cx - 120, 576))
-        screen.blit(small.render(f"Body {st['body'] + 1}/20 — {meaning}", True, (180, 180, 190)), (cx - 66, 590))
-        screen.blit(small.render(f"Skin: {SKINS[st['skin']][0]}", True, (150, 150, 165)), (cx - 66, 612))
+        screen.blit(gl, (cx - 120, 588))
+        screen.blit(small.render(f"Body {st['body'] + 1}/20 — {meaning}", True, (180, 180, 190)), (cx - 66, 600))
+        screen.blit(small.render(f"Skin: {SKINS[st['skin']][0]}", True, (150, 150, 165)), (cx - 66, 622))
         for i in range(20):                                            # all 20 bodies
-            th = cache.get(("thumb", i, st["arch"], st["skin"]))
-            if th is None:
-                th = to_surface(render(bodies[i], a, SKINS[st["skin"]][1], st["mut"] if a["name"] == "Mutant Pilgrim" else None), 1)
-                cache[("thumb", i, st["arch"], st["skin"])] = th
-            x = 352 + (i % 10) * 44 - 6
-            y = 650 + (i // 10) * 60 - 8
+            x = 352 + (i % 10) * 44
+            y = 668 + (i // 10) * 56
             if i == st["body"]:
-                pygame.draw.rect(screen, a["look"][5], (x, y, 52, 60), 2, border_radius=6)
-            screen.blit(th, (x - 6, y - 4))
+                pygame.draw.rect(screen, a["look"][5], (x - 4, y - 6, 44, 52), 2, border_radius=6)
+            draw_char(screen, x + 18, y + 22, 30, BODIES[i][0], a, SKINS[st["skin"]][1])
         # stats, traits, gear
         rx = 860
         pygame.draw.rect(screen, (18, 16, 26), (rx - 16, 100, 420, 600), border_radius=10)
