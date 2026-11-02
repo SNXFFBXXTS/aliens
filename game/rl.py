@@ -50,7 +50,7 @@ BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too de
 class World:
     def __init__(self, seed):
         self.seed = seed
-        self.dir = os.path.join(ROOT, f"world-{seed}")
+        self.dir = os.path.join(ROOT, f"world-{seed}-z{CS}")     # zone size in the name: old saves don't clash
         os.makedirs(os.path.join(self.dir, "chunks"), exist_ok=True)
         self.wd = proto.World(seed)
         self.species = weird.Species(seed)
@@ -156,7 +156,7 @@ class World:
         s = pygame.image.frombuffer(p.img.tobytes(), (CS * T, CS * T), "P")
         s.set_palette([tuple(c) for c in weird.palette(0)])
         s = pygame.transform.scale(s, (CS * PX, CS * PX))
-        if len(self.surf) > 600:
+        if len(self.surf) > 40:
             self.surf.clear()
         self.surf[k] = s
         return s
@@ -203,7 +203,7 @@ class Game:
         else:
             self.px, self.py = self.start_spot()
             self.hp = self.maxhp
-            self.say("You arrive in a small town. Strange things live out there: walk into them to fight.")
+            self.say("You arrive in town. Press M for the world map: travel on it with the arrows, M again to zoom back in.")
         self.here = self.w.cell(self.px, self.py)
         self.update_view()
         for i in self.w.dead:
@@ -303,6 +303,51 @@ class Game:
         if len(self.w.visited) > before and random.random() < 0.15:
             self.say("New land: you're the first to walk here.")
         self.end_turn()
+
+    def travel(self, dx, dy):
+        """move one square on the world map; time passes, then you're in that square's zone"""
+        tx, ty = self.px // CS + dx, self.py // CS + dy
+        if not self.w.inside(tx, ty):
+            self.say("Nothing but open sea that way.")
+            return
+        b = str(self.w.wd.biome[ty, tx])
+        if b in ("deep", "ocean", "shallow", "seaice"):
+            self.say("You'd need a boat to cross the water.")
+            return
+        if b in ("peak", "lava", "volcano"):
+            self.say({"peak": "The peaks are impassable.", "lava": "A sea of lava blocks the way.",
+                      "volcano": "The volcano's heart is far too hot."}[b])
+            return
+        if any(max(abs(m.x - self.px), abs(m.y - self.py)) <= 3 and m.angry for m in self.w.mobs.values()):
+            self.say("You can't slip away while something's on your heels.")
+            return
+        gx, gy = tx * CS + self.px % CS, ty * CS + self.py % CS
+        spot = None
+        for r in range(CS):                      # nearest open ground in the new zone
+            for oy in range(-r, r + 1):
+                for ox in range(-r, r + 1):
+                    if max(abs(ox), abs(oy)) == r:
+                        x, y = gx + ox, gy + oy
+                        if x // CS == tx and y // CS == ty and self.w.cell(x, y) not in BLOCKED and \
+                                self.w.cell(x, y) not in ("shallow", "lake", "river") and not self.w.mob_at(x, y):
+                            spot = (x, y)
+                            break
+                if spot:
+                    break
+            if spot:
+                break
+        if not spot:
+            self.say("You can't find a way in there.")
+            return
+        self.px, self.py = spot
+        self.turn += 60
+        c = self.w.cell(self.px, self.py)
+        if c != self.here:
+            d = im.describe(c)
+            self.say(NAMES.get(c, c) + "." + (" " + d if d else ""))
+            self.last_desc[c] = self.turn
+        self.here = c
+        self.update_view()
 
     def wait(self):
         if not self.dead and not self.show_map:
@@ -429,7 +474,11 @@ class Game:
                      pygame.K_h: (-1, 0), pygame.K_l: (1, 0), pygame.K_k: (0, -1), pygame.K_j: (0, 1),
                      pygame.K_KP4: (-1, 0), pygame.K_KP6: (1, 0), pygame.K_KP8: (0, -1), pygame.K_KP2: (0, 1),
                      pygame.K_KP7: (-1, -1), pygame.K_KP9: (1, -1), pygame.K_KP1: (-1, 1), pygame.K_KP3: (1, 1)}
-            if k in moves:
+            if k in moves and self.show_map:
+                self.travel(*moves[k])
+            elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and self.show_map:
+                self.show_map = False
+            elif k in moves:
                 self.act(*moves[k])
             elif k == pygame.K_n:
                 self.say("Sound on." if self.amb.toggle() else "Sound off.")
@@ -523,7 +572,7 @@ class Game:
         mw, mh = int(m.get_width() * k), int(m.get_height() * k)
         ms = pygame.transform.smoothscale(m, (mw, mh))
         fog = pygame.Surface((mw, mh), pygame.SRCALPHA)
-        fog.fill((0, 0, 0, 170))
+        fog.fill((0, 0, 0, 105))
         tw, th = mw / proto.W, mh / proto.H
         for (cx, cy) in self.w.visited:          # places you've been show clearly
             pygame.draw.rect(fog, (0, 0, 0, 0), (int(cx * tw), int(cy * th), int(tw) + 1, int(th) + 1))
@@ -534,7 +583,9 @@ class Game:
         if int((time.monotonic() - self.t0) * 3) % 2 == 0:
             x, y = ox + (self.px / CS) * tw, oy + (self.py / CS) * th
             pygame.draw.circle(self.screen, (255, 255, 255), (int(x), int(y)), max(4, int(tw * 0.5)), 2)
-        hint = self.font.render("Bright = places you've been.   M or Esc closes the map", True, (170, 170, 170))
+        x0, y0 = ox + (self.px // CS) * tw, oy + (self.py // CS) * th
+        pygame.draw.rect(self.screen, (255, 255, 255), (int(x0) - 1, int(y0) - 1, int(tw) + 3, int(th) + 3), 1)
+        hint = self.font.render("Arrows: travel one square (takes time)   M / Enter: zoom in   Bright = places you've been", True, (170, 170, 170))
         self.screen.blit(hint, (ox, oy + mh + 4))
 
     def draw_hud(self):

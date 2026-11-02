@@ -15,7 +15,7 @@ from art import P, B, S, T, Painter, dark, mix
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 W, H = 112, 70           # world map in tiles
-ZS = 12                  # local cells per world tile
+ZS = 40                  # local cells per world tile (one world-map square = one 40x40 zone)
 
 
 # ── noise ──
@@ -488,20 +488,39 @@ def gen_cells(wd, ox, oy, zw, zh):
                     b[m & (b != "bridge")] = "road"
                 else:
                     b[m & np.isin(b, ["deep", "ocean", "shallow"], invert=True)] = label
-    trace(wd.rlinks, 1.4, "river", 1.2)
-    trace(wd.dlinks, 0.75, "road", 1.0)
-    # towns: a plaza with houses round it
+    K = ZS / 12                                        # sizes below were tuned at 12 cells per square
+    trace(wd.rlinks, max(1.4, 0.65 * K), "river", 1.2)
+    trace(wd.dlinks, max(0.75, 0.35 * K), "road", 1.0)
+    # towns: a plaza, lanes running out of it, huts along them
     for n, (tx, ty) in enumerate(wd.towns):
         rng = np.random.default_rng(wd.seed + 5 + n * 7919)   # each town's own layout
         lx, ly = (tx + 0.5 - ox) * ZS, (ty + 0.5 - oy) * ZS
-        if -8 < lx < zw + 8 and -8 < ly < zh + 8:
+        reach = 5.5 * K * 0.85
+        if -reach - 2 < lx < zw + reach + 2 and -reach - 2 < ly < zh + reach + 2:
             d2 = (i - lx) ** 2 + (j - ly) ** 2
             ok = np.isin(b, ["river", "bridge", "lake", "shallow", "ocean", "deep", "lava"], invert=True)
-            b[(d2 < 4.5 ** 2) & ok] = "plaza"
-            for k in range(14):
-                a = rng.uniform(0, 6.28); r = rng.uniform(2.2, 5.5)
-                hx, hy = int(lx + math.cos(a) * r), int(ly + math.sin(a) * r * 0.8)
-                if 0 <= hx < zw and 0 <= hy < zh and ok[hy, hx] and b[hy, hx] != "road":
+            pr = 1.4 * K                                        # the square
+            b[(d2 < pr ** 2) & ok] = "plaza"
+            lanes = rng.integers(4, 7)
+            base = rng.uniform(0, 6.28)
+            for k in range(lanes):                              # lanes out of the square, huts both sides
+                a = base + k * 6.28 / lanes + rng.uniform(-0.25, 0.25)
+                ca, sa = math.cos(a), math.sin(a)
+                for t in np.arange(pr - 1, reach, 0.5):
+                    x, y = int(round(lx + ca * t)), int(round(ly + sa * t))
+                    if 0 <= x < zw and 0 <= y < zh and ok[y, x]:
+                        b[y, x] = "road"
+                for t in np.arange(pr + 1.5, reach - 1, rng.uniform(1.6, 2.4)):
+                    for side in (-1, 1):
+                        if rng.random() < 0.8:
+                            hx = int(round(lx + ca * t - sa * side * 2))
+                            hy = int(round(ly + sa * t + ca * side * 2))
+                            if 0 <= hx < zw and 0 <= hy < zh and ok[hy, hx] and b[hy, hx] not in ("road", "plaza", "house"):
+                                b[hy, hx] = "house"
+            for k in range(int(4 * K)):                         # a few huts tucked in between
+                a = rng.uniform(0, 6.28); r = rng.uniform(pr + 1, reach * 0.8)
+                hx, hy = int(lx + math.cos(a) * r), int(ly + math.sin(a) * r)
+                if 0 <= hx < zw and 0 <= hy < zh and ok[hy, hx] and b[hy, hx] not in ("road", "plaza", "house"):
                     b[hy, hx] = "house"
     return b, X, Y
 

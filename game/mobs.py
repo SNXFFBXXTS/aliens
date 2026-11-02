@@ -29,7 +29,7 @@ NOUN = {"legs": ["crawler", "tick", "skitter", "beetle", "strider"], "wings": ["
         "blob": ["slug", "ooze", "blob", "lump"], "tall": ["stalker", "lurcher", "walker", "shambler"],
         "tentacle": ["maw", "grasper", "tendril", "squid"], "beast": ["hound", "boar", "lurk", "rat"],
         "fish": ["eel", "fin", "lurker", "gulper"]}
-TEMPER = ["hostile", "hostile", "hostile", "timid", "neutral"]
+TEMPER = ["hostile", "hostile", "timid", "timid", "neutral", "neutral"]
 COLOURS = ["blood", "eye", "bloom", "lumen", "ochre", "frost", "spore", "rust", "salt"]
 
 
@@ -157,8 +157,11 @@ def spawn(best, cells, cx, cy, cs, tier, seed):
     """creatures that live in a chunk the first time it's made"""
     r = rng_for(seed, "spawn", cx, cy)
     out = []
-    want = r.choice([0, 0, 1, 1, 1, 2, 2, 3])
-    for k in range(int(want) * 3):
+    # most zones are quiet; further out they get busier
+    want = r.choice([[0, 0, 0, 0, 1, 1, 2], [0, 0, 1, 1, 2, 2, 3], [0, 1, 1, 2, 2, 3, 4]][min(tier, 2)])
+    if np.isin(cells, ["plaza", "house"]).any():
+        want = 0                                   # nothing nasty wanders round town
+    for k in range(int(want) * 6):
         if len(out) >= want:
             break
         x, y = int(r.integers(cs)), int(r.integers(cs))
