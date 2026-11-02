@@ -41,7 +41,7 @@ WEAPONS = {None: ("", "—"), "revolver": ("銃", "revolver"), "shotgun": ("砲"
 BACKS = {None: ("", "—"), "duster": ("衣", "duster coat"), "pack": ("包", "backpack"), "cloak": ("套", "cloak"),
          "quiver": ("矢", "quiver"), "tank": ("缶", "tank")}
 EXTRAS = {None: ("", "—"), "vest": ("甲", "armour vest"), "scarf": ("巾", "scarf"), "belt": ("帯", "toolbelt"),
-          "mutation": ("変", "mutation"), "chain": ("鎖", "chains"), "beads": ("珠", "beads")}
+          "mutation": ("変", "mutation"), "chain": ("鎖", "chains"), "beads": ("珠", "beads"), "goggles": ("眼", "goggles")}
 
 # how each weapon fights
 STYLE = {"revolver": "gun", "shotgun": "gun", "derringer": "gun", "rifle": "gun", "knife": "blade", "katana": "blade",
@@ -249,6 +249,8 @@ def draw_char(screen, cx, cy, size, body, look, skin, mut=None, pose=None):
 def pose_for(style, move, u, size):
     """keyframes for a move at progress u (0..1). Returns the pose, effects and when it hits."""
     s = size / 220
+    if move not in MOVES.get(style, ()):                      # switched character mid-move: use their first move
+        move = MOVES.get(style, MOVES["unarmed"])[0]
     ease = lambda x: 0.5 - 0.5 * math.cos(math.pi * max(0, min(1, x)))
     p, fx = {}, []
     hit = None
