@@ -90,13 +90,13 @@ class World:
             if d.get("seen"):
                 self.seen[k] = np.array([[(row >> i) & 1 for i in range(CS)] for row in d["seen"]], bool)
             if d.get("mobs") is None:
-                new_mobs = mobs.spawn(self.best, b, cx, cy, CS, self.tier(cx, cy), self.seed)
+                new_mobs = self.spawn_in(b, cx, cy)
                 fresh = True
             else:
                 new_mobs = [mobs.Mob.from_json(m, self.best) for m in d["mobs"]]
         elif self.inside(cx, cy):
-            b, _, _ = proto.gen_cells(self.wd, cx, cy, CS, CS)      # first visit: make it, then keep it
-            new_mobs = mobs.spawn(self.best, b, cx, cy, CS, self.tier(cx, cy), self.seed)
+            b = self.generate(cx, cy)                               # first visit: make it, then keep it
+            new_mobs = self.spawn_in(b, cx, cy)
             self.visited.add(k)
             fresh = True
         else:
@@ -109,6 +109,16 @@ class World:
         if fresh:
             self.write_chunk(cx, cy)
         return b
+
+    always_day = False
+    showcase = False
+
+    def generate(self, cx, cy):
+        b, _, _ = proto.gen_cells(self.wd, cx, cy, CS, CS)
+        return b
+
+    def spawn_in(self, b, cx, cy):
+        return mobs.spawn(self.best, b, cx, cy, CS, self.tier(cx, cy), self.seed)
 
     def write_chunk(self, cx, cy):
         p = self.path(cx, cy)
@@ -183,8 +193,8 @@ class World:
 
 
 class Game:
-    def __init__(self, seed, screen):
-        self.w = World(seed)
+    def __init__(self, seed, screen, world=None):
+        self.w = world or World(seed)
         self.screen = screen
         self.font = self.load_font(15)
         self.big = self.load_font(22, True)
@@ -277,8 +287,9 @@ class Game:
             json.dump({"px": self.px, "py": self.py, "hp": self.hp, "lvl": self.lvl, "xp": self.xp, "turn": self.turn,
                        "dead": sorted(self.w.dead)}, f)
         os.replace(self.state_path() + ".tmp", self.state_path())
-        with open(os.path.join(ROOT, "current.json"), "w") as f:
-            json.dump({"seed": self.w.seed}, f)
+        if not self.w.showcase:
+            with open(os.path.join(ROOT, "current.json"), "w") as f:
+                json.dump({"seed": self.w.seed}, f)
         self.last_save = time.monotonic()
 
     def say(self, m):
@@ -436,6 +447,9 @@ class Game:
             self.hp += 1
         self.update_view()
 
+    def clock(self):
+        return im.daytime(200 if self.w.always_day else self.turn)
+
     def zone_mood(self):
         """the zone's main ground type picks the ambience, so it doesn't flicker as you step between trees and paths"""
         k = (self.px // CS, self.py // CS)
@@ -449,7 +463,7 @@ class Game:
 
     def update_view(self):
         """what you can see from here, at this time of day"""
-        day, phase, r, tint = im.daytime(self.turn)
+        day, phase, r, tint = self.clock()
         r = min(r, im.THICK.get(self.here, 99))
         self.radius = r
         full = im.fov(self.px, self.py, r, self.w.cell)
@@ -465,6 +479,12 @@ class Game:
         self.w.remember(self.vis)
         self.dark = None
         self.amb.area(self.zone_mood(), phase == "Night")
+        note = getattr(self.w, "zone_note", None)
+        if note:
+            n = note(self.px // CS, self.py // CS)
+            if n and n != getattr(self, "_note", None):
+                self._note = n
+                self.say(n)
         if phase != getattr(self, "phase", phase):
             self.say({"Dawn": "The sky pales. Dawn.", "Day": "Full daylight.", "Dusk": "The light goes amber, then violet. Dusk.",
                       "Night": "Night falls. You can barely see past your hands."}[phase])
@@ -590,7 +610,7 @@ class Game:
             return self.dark[1]
         x0, y0 = cxp // PX, cyp // PX
         cols, rows = sw // PX + 2, vh // PX + 2
-        _, _, _, tint = im.daytime(self.turn)
+        _, _, _, tint = self.clock()
         a = np.zeros((rows, cols, 4), np.uint8)
         r = max(1, self.radius)
         for j in range(rows):
@@ -643,7 +663,7 @@ class Game:
         pygame.draw.rect(self.screen, (220, 50, 60), (bx, 8, int(160 * self.hp / self.maxhp), 14))
         self.screen.blit(self.small.render(f"HP {self.hp}/{self.maxhp}", True, (255, 255, 255)), (bx + 6, 7))
         danger = 1 + self.w.tier(self.px // CS, self.py // CS)
-        day, phase, _, _ = im.daytime(self.turn)
+        day, phase, _, _ = self.clock()
         info = f"Level {self.lvl}   XP {self.xp}/{self.lvl * 25}   Day {day}, {phase}   Danger " + "*" * danger
         self.screen.blit(self.font.render(info, True, (190, 190, 200)), (bx + 175, 5))
         expl = self.font.render(f"Explored {len(self.w.visited)}   Seed {self.w.seed}", True, (110, 110, 120))
@@ -701,7 +721,12 @@ def main():
     f = pygame.font.Font(None, 36)
     screen.blit(f.render("Making the world…", True, (220, 220, 220)), (40, 40))
     pygame.display.flip()
-    g = Game(pick_seed(args), screen)
+    if "--showcase" in args:
+        import showcase
+        g = Game(None, screen, world=showcase.ShowcaseWorld())
+        pygame.display.set_caption("Roguelike prototype: biome showcase")
+    else:
+        g = Game(pick_seed(args), screen)
     g.save()
     if "--shot" in args:                                  # testing: --shot PATH [--moves LRUDW...] [--map]
         for ch in args[args.index("--moves") + 1] if "--moves" in args else "":
