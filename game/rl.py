@@ -25,6 +25,7 @@ import proto                                           # noqa: E402
 import weird                                           # noqa: E402
 import mobs                                            # noqa: E402
 import immersion as im                                 # noqa: E402
+import structures                                      # noqa: E402
 from weird_proto import world8                         # noqa: E402
 from art import P, B, T, Painter                       # noqa: E402
 
@@ -41,13 +42,16 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "desert": "Desert", "salt": "Salt flats", "badlands": "Badlands", "hills": "Hills", "mountain": "Mountains",
          "peak": "Snowy peaks", "ash": "Ash wastes", "lava": "Lava", "crust": "Cooling lava", "volcano": "Volcano",
          "fungal": "Fungal forest", "crystal": "Crystal fields", "lake": "Lake", "river": "River", "road": "Road",
-         "bridge": "Bridge", "house": "House", "plaza": "Town", "trail": "Trail", "bonfire": "Town"}
+         "bridge": "Bridge", "house": "House", "plaza": "Town", "trail": "Trail", "bonfire": "Town",
+         "wall": "Wall", "wwall": "Timber wall", "ruin": "Rubble", "floor": "Concrete floor", "wfloor": "Floorboards",
+         "packed": "Packed earth", "scorch": "Scorched ground", "railh": "Railway", "railv": "Railway"}
 UNDER = {"road", "trail", "plaza", "house", "bonfire", "bridge"}     # drawn as flowing bands over the land
 BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too deep to swim.",
            "mountain": "The rock face is too steep.", "peak": "The peak is too steep to climb.",
            "house": "Someone lives there.", "lava": "Lava! Far too hot to step in.",
            "river": "The current's too strong to wade. Find a bridge.", "lake": "The lake's too deep to wade.",
-           "bonfire": "The bonfire's too hot to stand in."}
+           "bonfire": "The bonfire's too hot to stand in.", "wall": "A solid wall.", "wwall": "A timber wall.",
+           "ruin": "A heap of rubble and broken wall."}
 
 
 class World:
@@ -184,12 +188,13 @@ class World:
         for y in range(CS):
             for x in range(CS):
                 c = b[y, x]
-                if c in UNDER:                    # paths, squares, huts: the land's own ground underneath
+                if c in UNDER or c.startswith("p_"):   # paths, squares, huts, props: the ground underneath
                     win = B[y + M - 2:y + M + 3, x + M - 2:x + M + 3].ravel()
-                    want = [w for w in win if (w in weird.WATER) == (c == "bridge") and w not in UNDER]
+                    want = [w for w in win if (w in weird.WATER) == (c == "bridge") and w not in UNDER
+                            and not w.startswith("p_") and w not in ("wall", "wwall", "ruin")]
                     under = max(set(want), key=want.count) if want else ("river" if c == "bridge" else "grass")
                     weird.paint(p, self.species, x, y, under, R[y, x], mode="ground")
-                    if c in ("house", "bonfire"):
+                    if c in ("house", "bonfire") or c.startswith("p_"):
                         weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing")
                 else:
                     weird.paint(p, self.species, x, y, c, R[y, x], defer=items)
@@ -212,6 +217,10 @@ class World:
         bigs = sorted([it for it in items + nb if it[6]], key=lambda it: (it[2], it[1]))
         for (kind, x, y, spr, m, dx, _) in bigs:                 # every shadow first...
             p.big_shadow(x, y, spr, dx)
+        for (kind, x, y, spr, m, dx, big) in sorted(items, key=lambda it: (it[2], it[1])):
+            if not big and kind not in weird.SWAY and kind != "fire":       # small props from structures
+                p.shadow(x, y, spr, dx)
+                p.sprite(x, y, spr, m, dx=dx)
         for (kind, x, y, spr, m, dx, _) in bigs:                 # ...then the things that don't move
             if kind not in weird.SWAY:
                 p.big_body(x, y, spr, m, dx)
@@ -375,6 +384,9 @@ class Game:
         if c in BLOCKED:
             self.say(BLOCKED[c])
             return
+        if c in structures.BLOCKING:
+            self.say(f"A {structures.PROP_NAMES.get(c[2:], c[2:])} is in the way.")
+            return
         before = len(self.w.visited)
         self.px, self.py = nx, ny
         if c != self.here:
@@ -537,6 +549,14 @@ class Game:
         self.w.remember(self.vis)
         self.dark = None
         self.amb.area(self.zone_mood(), phase == "Night")
+        zk = (self.px // CS, self.py // CS)
+        if zk != getattr(self, "_zone", None):          # stumbled on something? say so, once per zone
+            self._zone = zk
+            if not self.w.showcase and zk not in getattr(self, "_found", set()):
+                d = structures.describe(self.w.wd, *zk)
+                if d:
+                    self._found = getattr(self, "_found", set()) | {zk}
+                    self.say(d)
         note = getattr(self.w, "zone_note", None)
         if note:
             n = note(self.px // CS, self.py // CS)
@@ -873,7 +893,11 @@ def main():
     f = pygame.font.Font(None, 36)
     screen.blit(f.render("Making the world…", True, (220, 220, 220)), (40, 40))
     pygame.display.flip()
-    if "--showcase" in args:
+    if "--structures" in args:
+        import showcase
+        g = Game(None, screen, world=showcase.StructureShowcase())
+        pygame.display.set_caption("Roguelike prototype: structures showcase")
+    elif "--showcase" in args:
         import showcase
         g = Game(None, screen, world=showcase.ShowcaseWorld())
         pygame.display.set_caption("Roguelike prototype: biome showcase")

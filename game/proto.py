@@ -590,6 +590,9 @@ def gen_cells(wd, ox, oy, zw, zh):
                 hx, hy = int(lx + math.cos(a) * r), int(ly + math.sin(a) * r)
                 if 0 <= hx < zw and 0 <= hy < zh and ok[hy, hx] and b[hy, hx] not in ("road", "plaza", "house"):
                     b[hy, hx] = "house"
+    if zw == ZS and zh == ZS and abs(ox - round(ox)) < 1e-9 and abs(oy - round(oy)) < 1e-9:
+        import structures                              # abandoned places (only when making a whole zone)
+        structures.place(wd, b, int(round(ox)), int(round(oy)), zw, zh)
     return b, X, Y
 
 

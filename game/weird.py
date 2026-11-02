@@ -411,6 +411,8 @@ SWAY = {"canopy", "spire", "coral", "eye", "shroom", "bulb", "willow", "tiers", 
 # how much of the listed density shows up in a zone (trees thinned out; rock, peaks, grass, fire as listed)
 THIN = {"tuft": 1.0, "rock": 1.0, "peak": 1.0, "hut": 1.0, "cone": 1.0, "fire": 1.0, "shard": 0.6}
 
+PROP_COLOURS = {}      # filled in by structures.py: "p_name" -> colours for '1' '2' '3' (None = a fire)
+
 # biome: family, accent family for '3' (None = own), [(kind, density)], ground marks per cell
 BIOMES = {
     "grass": ("moss", None, [("tuft", 0.45), ("stalks", 0.1), ("twist", 0.05), ("spire", 0.04)], 2),
@@ -483,7 +485,7 @@ class Species:
             _res = BIG.get(kind, RES) if big else RES
             try:
                 spr = GEN[kind](rng)
-                if kind not in ("rock", "peak", "hut", "cone") and rng.random() < 0.45:
+                if kind not in ("rock", "peak", "hut", "cone") and not kind.startswith("p_") and rng.random() < 0.45:
                     mutate(spr, rng)
             finally:
                 _res = RES
@@ -584,6 +586,52 @@ def ground(p, x, y, fam, r):
     c[g > 0.94] = F(fam, 2)
 
 
+BUILT = {"wall", "wwall", "ruin", "floor", "wfloor", "packed", "scorch", "railh", "railv"}
+
+
+def built(p, x, y, b, r):
+    """man-made ground: walls (lit top face, shaded foot), floors, rails, burnt earth"""
+    c = p.cell(x, y)
+    g = np.random.default_rng(int(r[0] * 1e9) & 0xFFFFFFFF).random((TS, TS))
+    yy, xx = np.mgrid[0:TS, 0:TS]
+    gx, gy = int(r[1] * 977), int(r[2] * 977)
+    if b in ("wall", "ruin"):
+        c[:] = F("cobble", 3)
+        c[(yy % 8 == 0) | (((xx + (yy // 8) * 6) % 12) == 0)] = F("cobble", 2)       # block courses
+        c[:6] = F("cobble", 5); c[:6][g[:6] < 0.2] = F("cobble", 4)                 # top face catches the light
+        c[-4:] = F("cobble", 1)                                                     # foot in shadow
+        c[g < 0.06] = F("cobble", 2)
+        if b == "ruin":                                                             # broken: chunks gone, rubble
+            hole = (_clumpy((TS, TS), np.random.default_rng(gx * 31 + gy), 9) > 0.55)
+            c[hole] = np.where(g[hole] < 0.4, F("cobble", 1), np.where(g[hole] < 0.8, F("cobble", 2), F("dirt", 1)))
+    elif b == "wwall":
+        c[:] = np.where((xx // 5) % 2 == 0, F("wood", 3), F("wood", 4))
+        c[xx % 5 == 0] = F("wood", 1)
+        c[:5] = F("wood", 5); c[-4:] = F("wood", 1)
+        c[g < 0.04] = F("wood", 2)
+    elif b == "floor":
+        c[:] = np.where(g < 0.25, F("cobble", 1), F("cobble", 2))
+        c[(yy % 16 == 0) | (xx % 16 == 0)] = F("cobble", 1)
+        c[(g > 0.985)] = F("dirt", 2)
+    elif b == "wfloor":
+        plank = yy // 6
+        tone = (plank * 7 + gy) % 3
+        c[:] = np.array([F("wood", 2), F("wood", 3), F("wood", 2)])[tone]
+        c[yy % 6 == 0] = F("wood", 0)
+        c[g < 0.03] = F("wood", 1)
+    elif b == "packed":
+        c[:] = np.where(g < 0.3, F("dirt", 1), F("dirt", 2))
+    elif b == "scorch":
+        c[:] = np.where(g < 0.5, F("ash", 0), F("ash", 1))
+        c[g > 0.985] = F("lava", 3)
+    elif b in ("railh", "railv"):
+        c[:] = np.where(g < 0.4, F("cobble", 1), F("cobble", 2))                     # ballast
+        a, o = (xx, yy) if b == "railh" else (yy, xx)
+        c[(a % 8 < 3)] = F("wood", 2)                                                # sleepers
+        c[(o == 9) | (o == 10) | (o == 21) | (o == 22)] = F("cobble", 5)            # the rails
+        c[(o == 11) | (o == 23)] = F("cobble", 1)
+
+
 def paint(p, sp, x, y, b, r, local=True, defer=None, mode="full"):
     """b = biome code, r = per-cell random numbers (0..1). With a defer list, big/live things are queued
     there to be drawn after all the ground is down. mode: "full", "ground" (no plants/things) or "thing" (only them)."""
@@ -614,6 +662,9 @@ def paint(p, sp, x, y, b, r, local=True, defer=None, mode="full"):
         p.fill(x, y, F("sea", 1))
         for yy in range(10, 24, 3):
             p.cell(x, y)[yy:yy + 2, :] = F("brick", 4 if yy % 6 == 1 else 3)
+        return
+    if b in BUILT:
+        built(p, x, y, b, r)
         return
     fam, acc, kinds, marks = BIOMES.get(b, ("stone", None, [], 1))
     if local:
@@ -649,9 +700,18 @@ def pick(sp, b, r, local=True):
     gives the same answer, so neighbouring zones can ask about each other's border cells."""
     if b in WATER or b in ("seaice", "lava", "bridge"):
         return None
-    fam, acc, kinds, marks = BIOMES.get(b, ("stone", None, [], 1))
     rr = lambda i: float(r[i % len(r)])
     pk = lambda i, n: int(rr(i) * n) % n
+    if b.startswith("p_"):                                   # a prop from a structure
+        if b not in PROP_COLOURS:
+            return None
+        m = PROP_COLOURS[b]
+        if m is None:
+            return ("fire", None, {}, 0, False)
+        big = local and BIG.get(b, RES) > RES
+        spr = sp.get(b, b, pk(6, 3), big=big)
+        return (b, spr, m, 0, big)
+    fam, acc, kinds, marks = BIOMES.get(b, ("stone", None, [], 1))
     roll = rr(5)
     for kind, dens in kinds:
         if local:

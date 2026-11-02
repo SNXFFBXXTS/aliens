@@ -23,26 +23,28 @@ def base_of(kind):
 class ShowcaseWorld(rl.World):
     showcase = True
     always_day = True
+    zones = ZONES
+    dirname = "showcase"
 
     def __init__(self, seed=4242):
         super().__init__(seed)
-        self.dir = os.path.join(rl.ROOT, f"showcase-z{CS}")
+        self.dir = os.path.join(rl.ROOT, f"{self.dirname}-z{CS}")
         shutil.rmtree(self.dir, ignore_errors=True)            # fresh every time
         os.makedirs(os.path.join(self.dir, "chunks"), exist_ok=True)
         self.visited = set()
         wd = self.wd
         wd.biome[:] = "deep"
-        for k, (kind, _) in enumerate(ZONES):
+        for k, (kind, _) in enumerate(self.zones):
             wd.biome[Y0, k] = MAPB.get(kind, kind)
         wd.towns = [(0, Y0)]
         wd.rlinks = []
-        wd.dlinks = [((k, Y0), (k + 1, Y0)) for k in range(len(ZONES) - 1)]
+        wd.dlinks = [((k, Y0), (k + 1, Y0)) for k in range(len(self.zones) - 1)]
         wd.ruins, wd.caves = [], []
         self.home = (0, Y0)
 
     def zone_note(self, cx, cy):
-        if cy == Y0 and 0 <= cx < len(ZONES):
-            return f"Showcase {cx + 1}/{len(ZONES)}: {ZONES[cx][1]}"
+        if cy == Y0 and 0 <= cx < len(self.zones):
+            return f"Showcase {cx + 1}/{len(self.zones)}: {self.zones[cx][1]}"
         return None
 
     def spawn_in(self, b, cx, cy):
@@ -53,7 +55,7 @@ class ShowcaseWorld(rl.World):
         out = []
         for k in (-1, 0, 1):
             x = cx + k
-            if 0 <= x < len(ZONES):
+            if 0 <= x < len(self.zones):
                 u = np.linspace(0, 1, 61)
                 px = x + u
                 py = Y0 + (31 + 4 * np.sin(px * 5.1) + 2 * np.sin(px * 13.7 + 1)) / CS
@@ -71,9 +73,9 @@ class ShowcaseWorld(rl.World):
         return [road], self.showcase_trails(cx)
 
     def generate(self, cx, cy):
-        if cy != Y0 or not 0 <= cx < len(ZONES):
+        if cy != Y0 or not 0 <= cx < len(self.zones):
             return np.full((CS, CS), "deep", dtype="<U10")
-        kind = ZONES[cx][0]
+        kind = self.zones[cx][0]
         j, i = np.mgrid[0:CS, 0:CS]
         X, Y = cx + (i + 0.5) / CS, Y0 + (j + 0.5) / CS
         n1 = proto.fbm(X * 3, Y * 3, 4, 77)
@@ -111,7 +113,7 @@ class ShowcaseWorld(rl.World):
         proto.mark_trails(b, cx, Y0, CS, CS, self.showcase_trails(cx))
         # soft borders: the edge of the zone before bleeds in
         if cx > 0:
-            prev = base_of(ZONES[cx - 1][0])
+            prev = base_of(self.zones[cx - 1][0])
             blend = (i < 7) & (n2 * 7 > i) & ~np.isin(b, ["river", "lake", "ocean", "shallow", "seaice"])
             b[blend] = prev
         # the road
@@ -140,3 +142,39 @@ class ShowcaseWorld(rl.World):
                     hx, hy = int(round(cx + ca * t - sa * side * 2)), int(round(cy + sa * t + ca * side * 2))
                     if 0 <= hx < CS and 0 <= hy < CS and b[hy, hx] not in ("road", "plaza") and rng.random() < 0.85:
                         b[hy, hx] = "house"
+
+
+class StructureShowcase(ShowcaseWorld):
+    """`rl --structures`: a road past every kind of abandoned place, one per zone"""
+    dirname = "structures"
+
+    def __init__(self, seed=4243):
+        import structures
+        self.S = structures
+        self.names = list(structures.L)
+        pref = ["grass", "forest", "desert", "tundra", "hills", "meadow", "savanna", "jungle", "badlands", "beach", "swamp", "fungal"]
+        zl = []
+        for n in self.names:
+            bs = structures.L[n]["biomes"]
+            zl.append((next((b for b in pref if bs is None or b in bs), "grass" if bs is None else sorted(bs)[0]), n))
+        self.zones = zl
+        super().__init__(seed)
+
+    def zone_note(self, cx, cy):
+        if cy == Y0 and 0 <= cx < len(self.zones):
+            d = self.S.L[self.zones[cx][1]]
+            return f"{cx + 1}/{len(self.zones)}: {d['title'][0].upper() + d['title'][1:]}. {d['desc']}"
+        return None
+
+    def generate(self, cx, cy):
+        b = super().generate(cx, cy)
+        if cy == Y0 and 0 <= cx < len(self.zones):
+            name = self.zones[cx][1]
+            r = np.random.default_rng(cx)
+            if self.S.L[name]["road"]:
+                ys, xs = np.nonzero(b == "road")
+                near = (int(xs[len(xs) // 2]), int(ys[len(ys) // 2]))
+            else:
+                near = (20, 13)
+            self.S.stamp(b, name, 0, False, r, CS, CS, near)
+        return b

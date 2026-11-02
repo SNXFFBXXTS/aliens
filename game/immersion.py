@@ -8,7 +8,7 @@ Ambience     generated ambient loops (made once into game/sounds/), quiet crossf
 import math, os, random, struct, wave
 import numpy as np
 
-BLOCK_SIGHT = {"mountain", "peak", "house"}
+BLOCK_SIGHT = {"mountain", "peak", "house", "wall", "wwall", "ruin"}
 THICK = {"forest": 8, "jungle": 6, "fungal": 7, "taiga": 9, "swamp": 10}     # max sight inside these
 
 DAY = 1000                       # turns in a day
