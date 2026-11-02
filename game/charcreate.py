@@ -212,108 +212,56 @@ def render(body, arch, skin, mut=None):
     return a
 
 
-# ── the player is ONE symbol; gear is shown as edits to that symbol (colour zones and extra brush strokes) ──
-WEAPON_STROKE = {   # (angle in degrees from straight down, length as a share of the symbol, colour, tip colour)
-    "revolver": (-80, 0.22, (70, 74, 84), (200, 204, 210)), "shotgun": (-82, 0.38, (70, 74, 84), (110, 76, 46)),
-    "derringer": (-80, 0.14, (90, 94, 104), (220, 200, 120)), "knife": (-30, 0.2, (200, 204, 210), (240, 240, 245)),
-    "axe": (-20, 0.36, (110, 76, 46), (200, 204, 210)), "scalpel": (-25, 0.14, (220, 224, 230), (255, 255, 255)),
-    "wrench": (-25, 0.26, (150, 154, 164), (200, 204, 210)), "staff": (-5, 0.6, (110, 76, 46), None),
-    "deck": (-90, 0.18, (60, 64, 80), None), "tome": (-90, 0.16, (110, 60, 50), None)}
-_CACHE = {}
+# gear drawn as symbols placed on the body symbol
+GEAR_GLYPH = {"cowboy": "笠", "cap": "帽", "cap2": "帽", "hardhat": "冑", "beanie": "帽", "hood": "巾", "goggles": "眼",
+              "circlet": "冠", "revolver": "銃", "shotgun": "砲", "derringer": "弾", "knife": "刀", "axe": "斧",
+              "scalpel": "刃", "wrench": "工", "staff": "杖", "deck": "電", "tome": "書", "duster": "衣", "pack": "包",
+              "cloak": "套", "vest": "甲", "scarf": "巾", "belt": "帯", "mutation": "変"}
+_FONTS = {}
 
 
-def _stroke(a, x0, y0, ang, length, width, col, tip=None):
-    """paint a brush stroke into an RGBA float array, soft-edged, thicker in the middle"""
-    H, W = a.shape[:2]
-    dx, dy = math.sin(math.radians(ang)), math.cos(math.radians(ang))
-    yy, xx = np.mgrid[0:H, 0:W]
-    px, py = xx - x0, yy - y0
-    t = np.clip(px * dx + py * dy, 0, length)
-    d = np.hypot(px - t * dx, py - t * dy)
-    wid = width * (0.65 + 0.35 * np.sin(np.pi * t / max(1, length)))
-    alpha = np.clip(wid / 2 + 0.6 - d, 0, 1)
-    for k in range(3):
-        a[..., k] = a[..., k] * (1 - alpha) + col[k] * alpha
-    a[..., 3] = np.maximum(a[..., 3], alpha * 255)
-    if tip:
-        m = alpha * (t > length * 0.75)
-        for k in range(3):
-            a[..., k] = a[..., k] * (1 - m) + tip[k] * m
+def cjk_font(size):
+    if size not in _FONTS:
+        _FONTS[size] = _font(CJK, size)
+    return _FONTS[size]
 
 
-def char_image(body, size, arch, skin, mut=None):
-    """the character as one RGBA image: the body symbol, coloured skin/clothes/hat, with gear painted onto it"""
-    key = (body, size, arch["name"], skin, mut)
-    if key in _CACHE:
-        return _CACHE[key]
-    hat, weapon, back, extra, coat, trim = arch["look"]
-    pad = int(size * 0.45)
-    W = H = size + pad * 2
-    try:
-        f = ImageFont.truetype(CJK, size, index=0)
-    except OSError:
-        f = ImageFont.load_default()
-    img = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(img).text((W // 2, H // 2), body, font=f, fill=255, anchor="mm")
-    alpha = np.array(img).astype(np.float32)
-    ink = alpha > 128
-    ys, xs = np.nonzero(ink)
-    top, bot, left, right = ys.min(), ys.max(), xs.min(), xs.max()
-    gh = bot - top + 1
-    stroke_w = max(2.0, float(np.median(np.diff(np.nonzero(ink[(top + bot) // 2])[0])[:1] if False else [size * 0.09])))
-    a = np.zeros((H, W, 4), np.float32)
-    yy = np.arange(H)[:, None]
-    col = np.zeros((H, W, 3), np.float32)
-    col[:] = coat
-    col[(yy < top + gh * 0.42).repeat(W, 1)] = skin                 # skin above, clothes below
-    if hat:                                                          # the top of the symbol is the hat
-        hc = trim if hat in ("goggles", "circlet") else tuple(int(v * 0.8) for v in coat)
-        band = (yy < top + gh * (0.16 if hat not in ("goggles", "circlet") else 0.24)).repeat(W, 1)
-        if hat in ("goggles", "circlet"):
-            band &= (yy > top + gh * 0.14).repeat(W, 1)
-        col[band] = hc
-    if extra in ("belt", "vest", "scarf"):                           # a band of colour across it
-        y0, y1 = {"belt": (0.6, 0.66), "vest": (0.42, 0.62), "scarf": (0.36, 0.42)}[extra]
-        col[((yy > top + gh * y0) & (yy < top + gh * y1)).repeat(W, 1)] = trim
-    a[..., :3] = col
-    a[..., 3] = alpha
-    if back in ("pack", "cloak", "duster"):                          # a darker stroke down its back
-        dark = tuple(int(v * 0.55) for v in coat)
-        ln = gh * (0.5 if back == "pack" else 0.75)
-        bx = left + (right - left) * 0.18
-        behind = np.zeros_like(a)
-        _stroke(behind, bx - size * 0.06, top + gh * 0.3, 8, ln, size * 0.11, dark)
-        m = behind[..., 3:4] / 255 * (1 - a[..., 3:4] / 255)          # only where the symbol isn't
-        a[..., :3] = a[..., :3] * (1 - m) + behind[..., :3] * m
-        a[..., 3:4] = np.maximum(a[..., 3:4], behind[..., 3:4])
-    if weapon in WEAPON_STROKE:                                      # an extra brush stroke from the hand
-        ang, ln, c1, tip = WEAPON_STROKE[weapon]
-        mid = ink & (np.arange(H)[:, None] > top + gh * 0.35) & (np.arange(H)[:, None] < top + gh * 0.6)
-        my, mx = np.nonzero(mid)
-        hx = mx.max() if len(mx) else right
-        hy = int(np.mean(my[mx >= hx - 2])) if len(mx) else (top + bot) // 2
-        _stroke(a, hx - size * 0.02, hy, 180 + ang if ang < -60 else ang, gh * ln, size * 0.075, c1, tip)
-    if mut:                                                          # mutation: glowing flecks in the strokes
-        r = random.Random(mut)
-        g = trim
-        for _ in range(14):
-            k = r.randrange(len(ys))
-            y, x = ys[k], xs[k]
-            a[max(0, y - 1):y + 2, max(0, x - 1):x + 2, :3] = g
-    out = np.clip(a, 0, 255).astype(np.uint8)
-    srf = pygame.image.frombuffer(out.tobytes(), (W, H), "RGBA").copy()
-    _CACHE[key] = srf
-    return srf
+def glyph(text, size, col):
+    return cjk_font(size).render(text, True, col)
 
 
 def draw_char(screen, cx, cy, size, body, arch, skin, mut=None, bob=0, sway=0.0):
-    srf = char_image(body, size, arch, skin, mut)
-    sh = srf.copy()
-    sh.fill((0, 0, 0, 255), special_flags=pygame.BLEND_RGBA_MIN)
-    sh.set_alpha(110)
-    w, h = srf.get_size()
-    screen.blit(sh, (cx - w // 2 + max(2, size // 40), cy - h // 2 + bob + max(2, size // 40)))
-    screen.blit(srf, (cx - w // 2, cy - h // 2 + bob))
+    """the character: the body symbol two-toned (skin above, clothes below), gear symbols placed on it"""
+    hat, weapon, back, extra, coat, trim = arch["look"]
+    dark = tuple(int(v * 0.55) for v in coat)
+    g_coat = glyph(body, size, coat)
+    g_skin = glyph(body, size, skin)
+    w, h = g_coat.get_size()
+    x0, y0 = cx - w // 2, cy - h // 2 + bob
+    gs = int(size * 0.42)
+    if back in ("pack", "cloak", "duster"):                    # behind the body
+        b = glyph(GEAR_GLYPH[back], int(size * 0.62), dark)
+        screen.blit(b, (x0 - int(w * 0.12) + int(sway * 3), y0 + int(h * 0.2)))
+    shadow = glyph(body, size, (0, 0, 0))
+    shadow.set_alpha(120)
+    screen.blit(shadow, (x0 + max(2, size // 40), y0 + max(2, size // 40)))
+    screen.blit(g_coat, (x0, y0))
+    cut = int(h * 0.42)                                        # the top of the symbol in skin
+    screen.blit(g_skin, (x0, y0), pygame.Rect(0, 0, w, cut))
+    if extra and extra != "mutation":
+        e = glyph(GEAR_GLYPH[extra], int(size * 0.3), trim)
+        screen.blit(e, (cx - e.get_width() // 2, y0 + int(h * (0.42 if extra != "scarf" else 0.3))))
+    if extra == "mutation" and mut:
+        m = glyph(GEAR_GLYPH["mutation"], int(size * 0.3), trim)
+        screen.blit(m, (x0 - int(w * 0.05), y0 + int(h * 0.35)))
+        if mut.startswith("Extra"):
+            screen.blit(glyph("手", int(size * 0.32), skin), (x0 - int(w * 0.18), y0 + int(h * 0.5)))
+    if hat:
+        hg = glyph(GEAR_GLYPH[hat], gs, trim if hat in ("goggles", "circlet") else coat)
+        screen.blit(hg, (cx - hg.get_width() // 2, y0 - int(hg.get_height() * 0.55)))
+    if weapon:
+        wg = glyph(GEAR_GLYPH[weapon], gs, (205, 208, 215))
+        screen.blit(wg, (x0 + int(w * 0.78) + int(sway * 2), y0 + int(h * 0.38)))
 
 
 def wrap(font, text, w):
