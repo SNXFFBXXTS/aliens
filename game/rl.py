@@ -20,7 +20,6 @@ import numpy as np
 import pygame
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "proto"))
 sys.path.insert(0, HERE)
 import proto                                           # noqa: E402
 import weird                                           # noqa: E402
