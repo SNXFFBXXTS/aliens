@@ -757,14 +757,11 @@ class Painter8:
         h = base - ys
         sx = np.round(xs + h * 0.7 + 3).astype(int) + x0
         sy = np.round(base - h * 0.3 + 1).astype(int) + y0
-        pts = set()
-        for ox, oy in ((0, 0), (1, 0), (0, 1), (1, 1)):
-            X, Y = sx + ox, sy + oy
-            ok = (X >= 0) & (X < W) & (Y >= 0) & (Y < H)
-            pts.update(zip(Y[ok].tolist(), X[ok].tolist()))
-        if pts:
-            Y, X = np.array(list(pts)).T
-            self.img[Y, X] = SHADE[self.img[Y, X]]
+        X = np.concatenate([sx, sx + 1, sx, sx + 1]); Y = np.concatenate([sy, sy, sy + 1, sy + 1])
+        ok = (X >= 0) & (X < W) & (Y >= 0) & (Y < H)
+        X, Y = X[ok], Y[ok]
+        if len(X):
+            self.img[Y, X] = SHADE[self.img[Y, X]]       # repeats read the same original, so no double-darkening
 
     def big_body(self, x, y, spr, m, dx=0, dy=0):
         x0, y0 = self._origin(x, y, spr, dx, dy)
@@ -1042,7 +1039,8 @@ def _up(a, m, cs):
     """cell-centred values -> one value per pixel of the zone (bilinear)"""
     s = (np.arange(cs * TS) + 0.5) / TS - 0.5 + m
     i0 = np.floor(s).astype(int)
-    t = s - i0
+    t = (s - i0).astype(np.float32)
+    a = a.astype(np.float32)
     rows = a[i0] * (1 - t)[:, None] + a[i0 + 1] * t[:, None]
     return rows[:, i0] * (1 - t)[None, :] + rows[:, i0 + 1] * t[None, :]
 
@@ -1218,14 +1216,26 @@ def _bridge(p, planks, ox, oy, seed):
 
 # ── ground painted pixel by pixel, so no edge between lands follows the grid ──
 def _vn(wx0, wy0, H, W, scale, seed):
-    """smooth value noise (0..1) over world pixels, so it carries straight on across zone borders"""
+    """smooth value noise (0..1) over world pixels, so it carries straight on across zone borders.
+    Worked out every few pixels and stretched: it's smooth anyway, and this is 10x cheaper."""
+    step = 4 if scale >= 20 else 2
+    if step > 1 and wx0 % step == 0 and wy0 % step == 0:
+        h2, w2 = -(-H // step), -(-W // step)
+        small = _vn_full(wx0 // step, wy0 // step, h2, w2, scale / step, seed)
+        return np.repeat(np.repeat(small, step, 0), step, 1)[:H, :W]
+    return _vn_full(wx0, wy0, H, W, scale, seed)
+
+
+def _vn_full(wx0, wy0, H, W, scale, seed):
     ys, xs = (wy0 + np.arange(H)) / scale, (wx0 + np.arange(W)) / scale
     iy, ix = np.floor(ys).astype(np.int64), np.floor(xs).astype(np.int64)
     fy, fx = (ys - iy)[:, None], (xs - ix)[None, :]
     fy, fx = fy * fy * (3 - 2 * fy), fx * fx * (3 - 2 * fx)
-    IY, IX = iy[:, None], ix[None, :]
-    a, b = _h(IX, IY, seed), _h(IX + 1, IY, seed)
-    c, d = _h(IX, IY + 1, seed), _h(IX + 1, IY + 1, seed)
+    ly, lx = np.arange(iy[0], iy[-1] + 2), np.arange(ix[0], ix[-1] + 2)     # hash only the lattice points
+    lat = _h(lx[None, :], ly[:, None], seed).astype(np.float32)
+    ry, rx = (iy - iy[0])[:, None], (ix - ix[0])[None, :]
+    a, b = lat[ry, rx], lat[ry, rx + 1]
+    c, d = lat[ry + 1, rx], lat[ry + 1, rx + 1]
     return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy
 
 
@@ -1240,8 +1250,9 @@ def ground_pass(p, G, m, cs, seed, ox, oy):
     names, inv = np.unique(G, return_inverse=True)
     code = inv.reshape(G.shape)[ci, cj]
     WX, WY = (ox + np.arange(W))[None, :].astype(np.int64), (oy + np.arange(H))[:, None].astype(np.int64)
-    gh = _h(WX, WY, seed + 5)
-    gh2 = _h(WX + 7, WY + 3, seed + 6)
+    grng = np.random.default_rng(seed + 5)                     # grain: fine to differ per zone
+    gh = grng.random((H, W), dtype=np.float32)
+    gh2 = grng.random((H, W), dtype=np.float32)
     lumpy = None
     for k, nm in enumerate(names):
         nm = str(nm)
@@ -1251,7 +1262,7 @@ def ground_pass(p, G, m, cs, seed, ox, oy):
         if nm in WATER:
             depth = WATER[nm]
             p.img[msk] = F("sea", 0 if depth < 2 else 1)
-            dash = msk & (_h(WX // 4, WY, seed + 7) < 0.03)                     # short ripple dashes
+            dash = msk & (np.repeat(grng.random((H, W // 4 + 1), dtype=np.float32), 4, 1)[:, :W] < 0.03)  # ripple dashes
             p.img[dash] = F("sea", (3, 5, 6)[depth])
         elif nm == "lava":
             lumpy = _vn(ox, oy, H, W, 7, seed + 8) if lumpy is None else lumpy

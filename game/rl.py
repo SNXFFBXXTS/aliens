@@ -13,7 +13,7 @@ The world is split into chunks (one world-map tile = 12 x 12 cells). A chunk is 
 it comes near you, then written to disk with the creatures living there, so it never changes after that.
 Saves: ~/.local/share/roguelike/
 """
-import json, math, os, random, sys, time, warnings
+import json, math, os, queue, random, sys, threading, time, warnings
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 warnings.filterwarnings("ignore", message=".*avx2.*")
 import numpy as np
@@ -65,6 +65,11 @@ class World:
         self.codes, self.surf = {}, {}
         self.mobs = {}                          # id -> Mob, for every loaded chunk
         self.feats = {}                         # chunk -> live things drawn every frame: (kind, world px, world py, key)
+        self.lock = threading.Lock()            # guards self.ready
+        self.clock_ = threading.RLock()         # guards making/loading zones (the background builder does it too)
+        self.ready, self.queued = {}, set()
+        self.jobs = queue.Queue()
+        threading.Thread(target=self._worker, daemon=True).start()
         self.fsprites = {}                      # key -> (sprite, colours, kind)
         self.fires = set()                      # cells with flames in them
         self.seen = {}                          # chunk -> bool array of cells you've laid eyes on
@@ -87,6 +92,13 @@ class World:
         k = (cx, cy)
         if k in self.codes:
             return self.codes[k]
+        with self.clock_:
+            if k in self.codes:
+                return self.codes[k]
+            return self._chunk(cx, cy)
+
+    def _chunk(self, cx, cy):
+        k = (cx, cy)
         p = self.path(cx, cy)
         new_mobs = []
         fresh = False
@@ -171,10 +183,59 @@ class World:
         return a is not None and a[y % CS, x % CS]
 
     def surface(self, cx, cy):
-        """the chunk drawn once as palette indices; colours come from the (cycling) palette at draw time"""
+        """the zone as a pygame surface (palette indices; colours come from the cycling palette at draw time).
+        Usually already built in the background by the prefetcher; otherwise built now."""
         k = (cx, cy)
         if k in self.surf:
             return self.surf[k]
+        with self.lock:
+            done = self.ready.pop(k, None)
+        if done is None:
+            done = self.build(cx, cy)
+        img, feats, fires, fsprites = done
+        self.feats[k] = feats
+        self.fires |= fires
+        self.fsprites.update(fsprites)
+        s = pygame.image.frombuffer(img.tobytes(), (CS * weird.TS, CS * weird.TS), "P")
+        s.set_palette([tuple(c) for c in weird.palette(0)])
+        s = pygame.transform.scale(s, (CS * PX, CS * PX))
+        if len(self.surf) > 40:
+            self.surf.clear()
+        self.surf[k] = s
+        return s
+
+    def surface_if_ready(self, cx, cy):
+        k = (cx, cy)
+        if k in self.surf or k in self.ready:
+            return self.surface(cx, cy)
+        if not self.inside(cx, cy):
+            return None                          # past the edge of the world: just darkness
+        self.prefetch([k])
+        return None
+
+    def prefetch(self, zones):
+        """ask the background builder to get these zones ready"""
+        for k in zones:
+            if k not in self.surf and k not in self.ready and k not in self.queued and self.inside(*k):
+                self.queued.add(k)
+                self.jobs.put(k)
+
+    def _worker(self):
+        while True:
+            k = self.jobs.get()
+            try:
+                if k not in self.surf:
+                    out = self.build(*k)
+                    with self.lock:
+                        self.ready[k] = out
+            except Exception:
+                pass
+            finally:
+                self.queued.discard(k)
+
+    def build(self, cx, cy):
+        """draw a zone into a palette-index image (no pygame, so it can run in the background)"""
+        fires, fsprites = set(), {}
         b = self.chunk(cx, cy)
         p = weird.Painter8(CS, CS)
         j, i = np.mgrid[0:CS, 0:CS]
@@ -231,6 +292,7 @@ class World:
                 hit = weird.pick_big(self.species, self.cell(gx, gy), proto.rnd_cells(np.array(gx), np.array(gy), self.seed + 99))
                 if hit:
                     nb.append((hit[0], x, y, hit[1], hit[2], hit[3], True))
+        # (everything below only touches this zone's own image)
         def jit(kind, x, y):                     # nudge natural things off the grid a little, up and down too
             if kind.startswith("p_") or kind == "hut":
                 return 0
@@ -250,24 +312,17 @@ class World:
             gx, gy = cx * CS + x, cy * CS + y
             if kind == "fire":
                 feats.append(("fire", gx * weird.TS, gy * weird.TS, None))
-                self.fires.add((gx, gy))
+                fires.add((gx, gy))
             elif kind in weird.SWAY:
                 key = (id(spr), tuple(sorted(m.items())))
-                self.fsprites[key] = (spr, m, kind)
+                fsprites[key] = (spr, m, kind)
                 n = spr.shape[0]
                 j_ = jit(kind, x, y)
                 if big:
                     feats.append((kind, gx * weird.TS + weird.TS // 2 - n // 2 + dx, (gy + 1) * weird.TS - n + j_, key))
                 else:
                     feats.append((kind, gx * weird.TS + dx, gy * weird.TS + j_ // 2, key))
-        self.feats[k] = feats
-        s = pygame.image.frombuffer(p.img.tobytes(), (CS * weird.TS, CS * weird.TS), "P")
-        s.set_palette([tuple(c) for c in weird.palette(0)])
-        s = pygame.transform.scale(s, (CS * PX, CS * PX))
-        if len(self.surf) > 40:
-            self.surf.clear()
-        self.surf[k] = s
-        return s
+        return p.img, feats, fires, fsprites
 
     def world_map(self):
         if self.map_img is None:
@@ -561,6 +616,11 @@ class Game:
         self.w.remember(self.vis)
         self.dark = None
         self.amb.area(self.zone_mood(), phase == "Night")
+        zx, zy = self.px // CS, self.py // CS                # get the zones round you ready before you get there
+        lx, ly = self.px % CS, self.py % CS
+        near = [(zx + dx, zy + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+        near.sort(key=lambda q: abs((q[0] - zx) * CS + CS / 2 - lx - CS / 2 * 0) + abs((q[1] - zy) * CS - ly + CS / 2))
+        self.w.prefetch(near)
         zk = (self.px // CS, self.py // CS)
         if zk != getattr(self, "_zone", None):          # new zone: name the land if it's changed, then anything found
             self._zone = zk
@@ -783,9 +843,13 @@ class Game:
         c1x, c1y = (cxp + sw) // (CS * PX), (cyp + vh) // (CS * PX)
         S.set_clip(pygame.Rect(0, top, sw, vh))
         pal = [tuple(c) for c in weird.palette(t, getattr(self, "trip", 0))]   # colours cycle every frame
+        here = (self.px // CS, self.py // CS)
         for cy in range(c0y, c1y + 1):
             for cx in range(c0x, c1x + 1):
-                srf = self.w.surface(cx, cy)
+                # your own zone is drawn now if it must be; the ones round it pop in when the builder has them
+                srf = self.w.surface(cx, cy) if (cx, cy) == here else self.w.surface_if_ready(cx, cy)
+                if srf is None:
+                    continue
                 srf.set_palette(pal)
                 S.blit(srf, (cx * CS * PX - cxp, cy * CS * PX - cyp + top))
         fires = self.draw_live(S, top, t, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
