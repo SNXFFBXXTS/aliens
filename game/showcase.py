@@ -13,7 +13,7 @@ ZONES = [("town", "Town"), ("grass", "Grassland"), ("meadow", "Meadow (with a la
          ("tundra", "Tundra"), ("icesheet", "Ice sheet"), ("coast", "Frozen coast"), ("beach", "Beach"),
          ("swamp", "Swamp"), ("jungle", "Jungle"), ("forest", "Forest (with a river)"), ("fungal", "Fungal forest"),
          ("crystal", "Crystal fields")]
-MAPB = {"town": "grass", "volcanic": "ash", "pass": "hills", "coast": "seaice"}   # what the world map shows
+MAPB = {"town": "grass", "volcanic": "ash", "pass": "hills", "coast": "drift"}   # what the world map shows
 
 
 def base_of(kind):
@@ -69,7 +69,7 @@ class ShowcaseWorld(rl.World):
             b[(n1 > 0.55) & ~near_road] = "mountain"
             b[(n1 > 0.72) & ~near_road] = "peak"
         elif kind == "coast":
-            b[j < 13] = "seaice"
+            b[j < 13] = "seaice"  # (map shows it as drift so you can travel through)
             b[(j < 13) & (np.abs(n2 - 0.5) < 0.04)] = "shallow"
             b[(j >= 13) & (j < 17)] = "drift"
             b[j >= 17] = "tundra"

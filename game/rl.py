@@ -42,6 +42,7 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "peak": "Snowy peaks", "ash": "Ash wastes", "lava": "Lava", "crust": "Cooling lava", "volcano": "Volcano",
          "fungal": "Fungal forest", "crystal": "Crystal fields", "lake": "Lake", "river": "River", "road": "Road",
          "bridge": "Bridge", "house": "House", "plaza": "Town", "trail": "Trail", "bonfire": "Town"}
+UNDER = {"road", "trail", "plaza", "house", "bonfire", "bridge"}     # drawn as flowing bands over the land
 BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too deep to swim.",
            "mountain": "The rock face is too steep.", "peak": "The peak is too steep to climb.",
            "house": "Someone lives there.", "lava": "Lava! Far too hot to step in.",
@@ -165,10 +166,29 @@ class World:
         p = weird.Painter8(CS, CS)
         j, i = np.mgrid[0:CS, 0:CS]
         R = proto.rnd_cells(cx * CS + i, cy * CS + j, self.seed + 99)
+        # the zone plus a margin of its neighbours, so roads flow smoothly across borders
+        M = 3
+        B = np.empty((CS + 2 * M, CS + 2 * M), dtype="<U10")
+        B[M:M + CS, M:M + CS] = b
+        for y in range(-M, CS + M):
+            for x in range(-M, CS + M):
+                if not (0 <= x < CS and 0 <= y < CS):
+                    gx, gy = cx * CS + x, cy * CS + y
+                    B[y + M, x + M] = self.cell(gx, gy) if self.inside(gx // CS, gy // CS) else "deep"
         items = []
         for y in range(CS):
             for x in range(CS):
-                weird.paint(p, self.species, x, y, b[y, x], R[y, x], defer=items)
+                c = b[y, x]
+                if c in UNDER:                    # paths, squares, huts: the land's own ground underneath
+                    win = B[y + M - 2:y + M + 3, x + M - 2:x + M + 3].ravel()
+                    want = [w for w in win if (w in weird.WATER) == (c == "bridge") and w not in UNDER]
+                    under = max(set(want), key=want.count) if want else ("river" if c == "bridge" else "grass")
+                    weird.paint(p, self.species, x, y, under, R[y, x], mode="ground")
+                    if c in ("house", "bonfire"):
+                        weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing")
+                else:
+                    weird.paint(p, self.species, x, y, c, R[y, x], defer=items)
+        weird.flow_bands(p, B, M, CS, (cx * 7919 + cy * 104729 + self.seed) & 0xFFFFFFFF)
         # big things from the zones next door that lean over the border: their shadows (and rocks/peaks) belong here too
         nb = []
         for y in range(-1, CS + 3):

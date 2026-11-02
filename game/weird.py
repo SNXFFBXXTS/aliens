@@ -580,10 +580,14 @@ def ground(p, x, y, fam, r):
     c[g > 0.94] = F(fam, 2)
 
 
-def paint(p, sp, x, y, b, r, local=True, defer=None):
-    """b = biome code, r = per-cell random numbers (0..1). With a defer list, big sprites are queued
-    there (x, y, sprite, colours, dx) to be drawn with p.big() after all the ground is down."""
-    """b = biome code, r = per-cell random numbers (0..1)"""
+def paint(p, sp, x, y, b, r, local=True, defer=None, mode="full"):
+    """b = biome code, r = per-cell random numbers (0..1). With a defer list, big/live things are queued
+    there to be drawn after all the ground is down. mode: "full", "ground" (no plants/things) or "thing" (only them)."""
+    if mode == "thing":
+        hit = pick(sp, b, r, local)
+        if hit and defer is not None:
+            defer.append((hit[0], x, y) + hit[1:])
+        return
     rr = lambda i: float(r[i % len(r)])
     pk = lambda i, n: int(rr(i) * n) % n
     pos = lambda i: (pk(i, TS - 3), pk(i + 1, TS - 3))
@@ -620,6 +624,8 @@ def paint(p, sp, x, y, b, r, local=True, defer=None):
         marks = 0
     for k in range(2 * marks + (2 if marks else 0)):       # fine specks: more of them, each smaller
         p.stamp(x, y, MARKS[pk(k + 9, len(MARKS))], F(fam, 2 + pk(k + 3, 3)), *pos(k * 2))
+    if mode == "ground":
+        return
     hit = pick(sp, b, r, local)
     if not hit:
         return
@@ -709,6 +715,48 @@ def sway_frames(spr, m, pal, nf=8, amp=2.0, bob=False):
         a[Y, X, 3] = 255
         out.append(a)
     return out, pad
+
+
+# ── roads, paths and town squares as smooth flowing bands (not cell-sized blocks) ──
+ROADLIKE = ("road", "plaza", "bonfire", "bridge")
+
+
+def _blur(a):
+    for _ in range(2):
+        for ax in (0, 1):
+            pad = np.pad(a, [(1, 1) if q == ax else (0, 0) for q in (0, 1)], mode="edge")
+            lo = pad[:-2] if ax == 0 else pad[:, :-2]
+            mid = pad[1:-1] if ax == 0 else pad[:, 1:-1]
+            hi = pad[2:] if ax == 0 else pad[:, 2:]
+            a = 0.25 * lo + 0.5 * mid + 0.25 * hi
+    return a
+
+
+def _up(a, m, cs):
+    """cell-centred values -> one value per pixel of the zone (bilinear)"""
+    s = (np.arange(cs * TS) + 0.5) / TS - 0.5 + m
+    i0 = np.floor(s).astype(int)
+    t = s - i0
+    rows = a[i0] * (1 - t)[:, None] + a[i0 + 1] * t[:, None]
+    return rows[:, i0] * (1 - t)[None, :] + rows[:, i0 + 1] * t[None, :]
+
+
+def flow_bands(p, B, m, cs, seed):
+    """B = cell codes of the zone plus an m-cell margin from the zones round it"""
+    rng = np.random.default_rng(seed)
+    g = rng.random(p.img.shape)
+    water = np.repeat(np.repeat(np.isin(B[m:m + cs, m:m + cs], list(WATER) + ["bridge"]), TS, 0), TS, 1)
+    tr = _up(_blur((B == "trail").astype(float)), m, cs)
+    band = tr > 0.24
+    p.img[band] = np.where(g[band] < 0.3, F("brick", 0), F("brick", 1))
+    rd = _up(_blur(np.isin(B, ROADLIKE).astype(float)), m, cs)
+    band, rim = rd > 0.27, (rd > 0.2) & (rd <= 0.27)
+    land = band & ~water
+    p.img[land] = np.where(g[land] < 0.22, F("brick", 1), np.where(g[land] > 0.93, F("brick", 3), F("brick", 2)))
+    p.img[rim & ~water] = F("brick", 0)
+    planks = band & water                                    # a road over water is a bridge: planks
+    yy = np.nonzero(planks)[0]
+    p.img[planks] = np.where((yy // 4) % 2 == 0, F("brick", 3), F("brick", 2))
 
 
 def to_rgb(img8, t=0.0):
