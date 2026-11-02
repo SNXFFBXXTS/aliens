@@ -293,6 +293,8 @@ class Game:
         self.last_save = time.monotonic()
 
     def say(self, m):
+        if self.msgs and self.msgs[-1] == m:            # don't stack the same line while you lean on a wall
+            return
         self.msgs.append(m)
         self.msgs = self.msgs[-4:]
 
@@ -517,7 +519,20 @@ class Game:
         self.say("You wake up back in town, aching all over. (You lost your xp towards the next level.)")
         self.save()
 
+    def walk_held(self):
+        """holding a direction key keeps walking that way at a steady pace"""
+        h = getattr(self, "hold", None)
+        if not h or self.dead or self.show_map:
+            return
+        key, d, t0 = h
+        now = time.monotonic()
+        if now - t0 >= 0.16 and now - getattr(self, "last_step", 0) >= 0.075:
+            self.last_step = now
+            self.act(*d)
+
     def handle(self, e):
+        if e.type == pygame.KEYUP and getattr(self, "hold", None) and e.key == self.hold[0]:
+            self.hold = None
         if e.type == pygame.KEYDOWN:
             k = e.key
             if self.dead:
@@ -536,7 +551,8 @@ class Game:
             elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and self.show_map:
                 self.show_map = False
             elif k in moves:
-                self.act(*moves[k])
+                self.act(*moves[k])                 # first press: turn (or step if already facing that way)
+                self.hold = (k, moves[k], time.monotonic())
             elif k == pygame.K_n:
                 self.say("Sound on." if self.amb.toggle() else "Sound off.")
             elif k == pygame.K_m:
@@ -714,7 +730,7 @@ def main():
     args = sys.argv[1:]
     os.makedirs(ROOT, exist_ok=True)
     pygame.init()
-    pygame.key.set_repeat(170, 60)
+    pygame.key.set_repeat()                               # off: held keys are handled by Game.walk_held
     screen = pygame.display.set_mode((1280, 800), pygame.RESIZABLE)
     pygame.display.set_caption("Roguelike prototype")
     screen.fill((0, 0, 0))
@@ -748,6 +764,7 @@ def main():
                 running = False
             elif not g.handle(e):
                 running = False
+        g.walk_held()
         g.frame()
         clock.tick(30)
     if not g.dead:
