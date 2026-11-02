@@ -742,13 +742,13 @@ class Painter8:
             ok = (X >= 0) & (X < TS) & (Y >= 0) & (Y < TS)
             c[Y[ok], X[ok]] = SHADE[c[Y[ok], X[ok]]]
 
-    def _origin(self, x, y, spr, dx):
+    def _origin(self, x, y, spr, dx, dy=0):
         n = spr.shape[0]
-        return x * TS + TS // 2 - n // 2 + dx, (y + 1) * TS - n
+        return x * TS + TS // 2 - n // 2 + dx, (y + 1) * TS - n + dy
 
-    def big_shadow(self, x, y, spr, dx=0):
+    def big_shadow(self, x, y, spr, dx=0, dy=0):
         """the long shadow of a big sprite: its silhouette sheared down-right; darkens what's beneath"""
-        x0, y0 = self._origin(x, y, spr, dx)
+        x0, y0 = self._origin(x, y, spr, dx, dy)
         H, W = self.img.shape
         ys, xs = np.nonzero(spr != ".")
         if not len(ys):
@@ -766,8 +766,8 @@ class Painter8:
             Y, X = np.array(list(pts)).T
             self.img[Y, X] = SHADE[self.img[Y, X]]
 
-    def big_body(self, x, y, spr, m, dx=0):
-        x0, y0 = self._origin(x, y, spr, dx)
+    def big_body(self, x, y, spr, m, dx=0, dy=0):
+        x0, y0 = self._origin(x, y, spr, dx, dy)
         H, W = self.img.shape
         for ch, idx in m.items():
             yy, xx = np.nonzero(spr == ch)
@@ -962,7 +962,7 @@ def pick(sp, b, r, local=True):
                 m = dict(m)
                 m["3"] = F(NEON[zlib.crc32(f"{sp.seed}{b}{kind}{var}".encode()) % len(NEON)], 6)
             spr = sp.get(b, kind, var, big=big)
-            dx = (pk(7, 9) - 4) if big else ((pk(7, 5) - 2) if local else 0)
+            dx = (pk(7, 21) - 10) if big else ((pk(7, 9) - 4) if local else 0)
             return (kind, spr, m, dx, big)
         roll -= dens
     return None
@@ -1208,6 +1208,62 @@ def _bridge(p, planks, ox, oy, seed):
         knot = _h(Y // 2, (xs + ox) // 3, seed + 5) < 0.02
         out = np.where(knot, F("wood", 1), out)
         p.img[ys, xs] = out
+
+
+# ── ground painted pixel by pixel, so no edge between lands follows the grid ──
+def _vn(wx0, wy0, H, W, scale, seed):
+    """smooth value noise (0..1) over world pixels, so it carries straight on across zone borders"""
+    ys, xs = (wy0 + np.arange(H)) / scale, (wx0 + np.arange(W)) / scale
+    iy, ix = np.floor(ys).astype(np.int64), np.floor(xs).astype(np.int64)
+    fy, fx = (ys - iy)[:, None], (xs - ix)[None, :]
+    fy, fx = fy * fy * (3 - 2 * fy), fx * fx * (3 - 2 * fx)
+    IY, IX = iy[:, None], ix[None, :]
+    a, b = _h(IX, IY, seed), _h(IX + 1, IY, seed)
+    c, d = _h(IX, IY + 1, seed), _h(IX + 1, IY + 1, seed)
+    return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy
+
+
+def ground_pass(p, G, m, cs, seed, ox, oy):
+    """G = what the ground is made of in each cell (zone + m-cell margin). Each pixel looks up its cell at a
+    wobbled position, so borders between lands, shores and lava come out as organic shapes, not squares."""
+    H, W = p.img.shape
+    dx = (_vn(ox, oy, H, W, 41, seed + 1) - 0.5) * 34 + (_vn(ox, oy, H, W, 9, seed + 2) - 0.5) * 9
+    dy = (_vn(ox, oy, H, W, 41, seed + 3) - 0.5) * 34 + (_vn(ox, oy, H, W, 9, seed + 4) - 0.5) * 9
+    ci = np.clip(np.floor((np.arange(H)[:, None] + dy) / TS + m).astype(int), 0, G.shape[0] - 1)
+    cj = np.clip(np.floor((np.arange(W)[None, :] + dx) / TS + m).astype(int), 0, G.shape[1] - 1)
+    names, inv = np.unique(G, return_inverse=True)
+    code = inv.reshape(G.shape)[ci, cj]
+    WX, WY = (ox + np.arange(W))[None, :].astype(np.int64), (oy + np.arange(H))[:, None].astype(np.int64)
+    gh = _h(WX, WY, seed + 5)
+    gh2 = _h(WX + 7, WY + 3, seed + 6)
+    lumpy = None
+    for k, nm in enumerate(names):
+        nm = str(nm)
+        msk = code == k
+        if not msk.any():
+            continue
+        if nm in WATER:
+            depth = WATER[nm]
+            p.img[msk] = F("sea", 0 if depth < 2 else 1)
+            dash = msk & (_h(WX // 4, WY, seed + 7) < 0.03)                     # short ripple dashes
+            p.img[dash] = F("sea", (3, 5, 6)[depth])
+        elif nm == "lava":
+            lumpy = _vn(ox, oy, H, W, 7, seed + 8) if lumpy is None else lumpy
+            p.img[msk] = np.clip(2 + ((lumpy[msk] - 0.35) * 11).astype(int), 2, 7) + 8 + FAMS.index("lava") * NS
+        elif nm == "crust":
+            p.img[msk] = np.where(gh[msk] < 0.5, F("ash", 0), F("ash", 1))
+            crack = msk & (np.abs(_vn(ox, oy, H, W, 11, seed + 9) - 0.5) < 0.035)
+            p.img[crack] = F("lava", 3)
+        elif nm == "seaice":
+            p.img[msk] = np.where(gh[msk] < 0.2, F("ice", 0), F("ice", 1))
+            p.img[msk & (gh2 > 0.985)] = F("ice", 5)
+        elif nm in BUILT:
+            continue
+        else:
+            fam = BIOMES.get(nm, ("moss",))[0]
+            p.img[msk] = np.where(gh[msk] < 0.22, F(fam, 0), np.where(gh[msk] > 0.94, F(fam, 2), F(fam, 1)))
+            speck = msk & (gh2 > 0.982)
+            p.img[speck] = np.where(gh2[speck] > 0.991, F(fam, 4), F(fam, 3))
 
 
 def to_rgb(img8, t=0.0):

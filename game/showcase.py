@@ -111,11 +111,15 @@ class ShowcaseWorld(rl.World):
         elif kind == "icesheet":
             b[n2 > 0.66] = "drift"
         proto.mark_trails(b, cx, Y0, CS, CS, self.showcase_trails(cx))
-        # soft borders: the edge of the zone before bleeds in
+        # gradual borders: the zones either side bleed in, in scattered patches that thin out towards the middle
+        open_land = np.isin(b, proto.BLEND_LAND)
+        score = proto.cell_rand(cx * CS + i, j, 991) * 0.55 + proto.fbm(X * 4, Y * 4, 2, 992) * 0.45
         if cx > 0:
             prev = base_of(self.zones[cx - 1][0])
-            blend = (i < 7) & (n2 * 7 > i) & ~np.isin(b, ["river", "lake", "ocean", "shallow", "seaice"])
-            b[blend] = prev
+            b[open_land & (score < np.clip((22 - i) / 44, 0, 1) * 0.95)] = prev
+        if cx + 1 < len(self.zones):
+            nxt = base_of(self.zones[cx + 1][0])
+            b[open_land & (score > 1 - np.clip((i - 18) / 44, 0, 1) * 0.95)] = nxt
         # the road
         for x in range(CS):
             for y in (road_y[x],):

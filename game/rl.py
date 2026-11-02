@@ -184,27 +184,35 @@ class World:
                 if not (0 <= x < CS and 0 <= y < CS):
                     gx, gy = cx * CS + x, cy * CS + y
                     B[y + M, x + M] = self.cell(gx, gy) if self.inside(gx // CS, gy // CS) else "deep"
+        # what the ground is made of under everything: paths, props and buildings stand on the land round them
+        G = B.copy()
+        for y in range(B.shape[0]):
+            for x in range(B.shape[1]):
+                c = B[y, x]
+                if c in UNDER or c.startswith("p_") or c in weird.BUILT:
+                    win = B[max(0, y - 2):y + 3, max(0, x - 2):x + 3].ravel()
+                    want = [w for w in win if (w in weird.WATER) == (c == "bridge") and w not in UNDER
+                            and not w.startswith("p_") and w not in weird.BUILT]
+                    G[y, x] = max(set(want), key=want.count) if want else ("river" if c == "bridge" else "grass")
+        zseed = (cx * 7919 + cy * 104729 + self.seed) & 0xFFFFFFFF
+        weird.ground_pass(p, G, M, CS, zseed, cx * CS * weird.TS, cy * CS * weird.TS)
         items = []
         for y in range(CS):
             for x in range(CS):
                 c = b[y, x]
-                if c in UNDER or c.startswith("p_"):   # paths, squares, huts, props: the ground underneath
-                    win = B[y + M - 2:y + M + 3, x + M - 2:x + M + 3].ravel()
-                    want = [w for w in win if (w in weird.WATER) == (c == "bridge") and w not in UNDER
-                            and not w.startswith("p_") and w not in ("wall", "wwall", "ruin")]
-                    under = max(set(want), key=want.count) if want else ("river" if c == "bridge" else "grass")
-                    weird.paint(p, self.species, x, y, under, R[y, x], mode="ground")
-                    if c in ("house", "bonfire") or c.startswith("p_"):
-                        weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing")
-                elif c in weird.WALLS:             # walls join up with the walls next to them
+                if c in weird.WALLS:               # walls join up with the walls next to them
                     W_ = weird.WALLS
                     weird.built(p, x, y, c, R[y, x], nb=(B[y + M - 1, x + M] in W_, B[y + M + 1, x + M] in W_,
                                                           B[y + M, x + M - 1] in W_, B[y + M, x + M + 1] in W_))
-                else:
-                    weird.paint(p, self.species, x, y, c, R[y, x], defer=items)
+                elif c in weird.BUILT:
+                    weird.built(p, x, y, c, R[y, x])
+                elif c in UNDER and c not in ("house", "bonfire"):
+                    continue
+                else:                              # trees, plants, props: the ground is already down
+                    weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing")
         roads, trails = self.lines(cx, cy)
         to_px = lambda L: [(pts - (cx, cy)) * CS * weird.TS for pts in L]
-        weird.flow_bands(p, B, M, CS, (cx * 7919 + cy * 104729 + self.seed) & 0xFFFFFFFF,
+        weird.flow_bands(p, B, M, CS, zseed,
                          ox=cx * CS * weird.TS, oy=cy * CS * weird.TS, roads=to_px(roads), trails=to_px(trails))
         # big things from the zones next door that lean over the border: their shadows (and rocks/peaks) belong here too
         nb = []
@@ -218,16 +226,20 @@ class World:
                 hit = weird.pick_big(self.species, self.cell(gx, gy), proto.rnd_cells(np.array(gx), np.array(gy), self.seed + 99))
                 if hit:
                     nb.append((hit[0], x, y, hit[1], hit[2], hit[3], True))
+        def jit(kind, x, y):                     # nudge natural things off the grid a little, up and down too
+            if kind.startswith("p_") or kind == "hut":
+                return 0
+            return int(weird._h(np.array(cx * CS + x), np.array(cy * CS + y), 4411) * 15) - 7
         bigs = sorted([it for it in items + nb if it[6]], key=lambda it: (it[2], it[1]))
         for (kind, x, y, spr, m, dx, _) in bigs:                 # every shadow first...
-            p.big_shadow(x, y, spr, dx)
+            p.big_shadow(x, y, spr, dx, jit(kind, x, y))
         for (kind, x, y, spr, m, dx, big) in sorted(items, key=lambda it: (it[2], it[1])):
             if not big and kind not in weird.SWAY and kind != "fire":       # small props from structures
                 p.shadow(x, y, spr, dx)
                 p.sprite(x, y, spr, m, dx=dx)
         for (kind, x, y, spr, m, dx, _) in bigs:                 # ...then the things that don't move
             if kind not in weird.SWAY:
-                p.big_body(x, y, spr, m, dx)
+                p.big_body(x, y, spr, m, dx, jit(kind, x, y))
         feats = []
         for (kind, x, y, spr, m, dx, big) in sorted(items, key=lambda it: (it[2], it[1])):
             gx, gy = cx * CS + x, cy * CS + y
@@ -238,10 +250,11 @@ class World:
                 key = (id(spr), tuple(sorted(m.items())))
                 self.fsprites[key] = (spr, m, kind)
                 n = spr.shape[0]
+                j_ = jit(kind, x, y)
                 if big:
-                    feats.append((kind, gx * weird.TS + weird.TS // 2 - n // 2 + dx, (gy + 1) * weird.TS - n, key))
+                    feats.append((kind, gx * weird.TS + weird.TS // 2 - n // 2 + dx, (gy + 1) * weird.TS - n + j_, key))
                 else:
-                    feats.append((kind, gx * weird.TS + dx, gy * weird.TS, key))
+                    feats.append((kind, gx * weird.TS + dx, gy * weird.TS + j_ // 2, key))
         self.feats[k] = feats
         s = pygame.image.frombuffer(p.img.tobytes(), (CS * weird.TS, CS * weird.TS), "P")
         s.set_palette([tuple(c) for c in weird.palette(0)])
@@ -394,15 +407,9 @@ class Game:
         before = len(self.w.visited)
         self.px, self.py = nx, ny
         if c != self.here:
-            nm = NAMES.get(c, c)
             if c == "shallow":
-                self.say("You wade through the " + nm.lower() + ".")
-            elif c not in ("road", "bridge", "plaza") or self.here not in ("road", "bridge", "plaza"):
-                d = im.describe(c) if self.turn - self.last_desc.get(c, -9999) > 150 else None
-                if d:
-                    self.last_desc[c] = self.turn
-                self.say(nm + ". " + d if d else nm + ".")
-            self.here = c
+                self.say("You wade into knee-deep water.")
+            self.here = c                     # (the land is named once per zone, in update_view)
         if len(self.w.visited) > before and random.random() < 0.15:
             self.say("New land: you're the first to walk here.")
         self.end_turn()
@@ -445,10 +452,6 @@ class Game:
         self.px, self.py = spot
         self.turn += 60
         c = self.w.cell(self.px, self.py)
-        if c != self.here:
-            d = im.describe(c)
-            self.say(NAMES.get(c, c) + "." + (" " + d if d else ""))
-            self.last_desc[c] = self.turn
         self.here = c
         self.update_view()
 
@@ -554,8 +557,15 @@ class Game:
         self.dark = None
         self.amb.area(self.zone_mood(), phase == "Night")
         zk = (self.px // CS, self.py // CS)
-        if zk != getattr(self, "_zone", None):          # stumbled on something? say so, once per zone
+        if zk != getattr(self, "_zone", None):          # new zone: name the land if it's changed, then anything found
             self._zone = zk
+            mood = self.zone_mood()
+            if mood != getattr(self, "_named", None) and not self.w.showcase:
+                self._named = mood
+                d = im.describe(mood) if self.turn - self.last_desc.get(mood, -9999) > 150 else None
+                if d:
+                    self.last_desc[mood] = self.turn
+                self.say(NAMES.get(mood, mood) + "." + (" " + d if d else ""))
             if not self.w.showcase and zk not in getattr(self, "_found", set()):
                 d = structures.describe(self.w.wd, *zk)
                 if d:

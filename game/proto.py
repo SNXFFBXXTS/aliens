@@ -521,6 +521,10 @@ def mark_trails(b, ox, oy, zw, zh, lines):
                     b[y, x] = "trail"
 
 
+BLEND_LAND = ["grass", "meadow", "savanna", "forest", "jungle", "swamp", "taiga", "tundra", "icesheet", "desert",
+              "salt", "badlands", "hills", "ash", "fungal", "crystal", "beach"]
+
+
 def gen_cells(wd, ox, oy, zw, zh):
     """the terrain of a local area: ox, oy = world coords of its top-left; zw x zh cells (ZS per world tile).
     Depends only on the seed and the coordinates, so any piece of the world comes out the same every time."""
@@ -529,6 +533,16 @@ def gen_cells(wd, ox, oy, zw, zh):
     f = wd.fields(X, Y, 8)
     f["X"], f["Y"] = X, Y
     b = wd.classify(f, local=True)
+    # gradual borders: ask again at a jittered spot; where both answers are open land, use the jittered one,
+    # so the next biome's ground and plants start turning up in scattered patches well before you reach it
+    gxi, gyi = np.floor(X * ZS).astype(np.int64), np.floor(Y * ZS).astype(np.int64)
+    jx = (cell_rand(gxi, gyi, wd.seed + 80) - 0.5) * 0.9 + (fbm(X * 3, Y * 3, 2, wd.seed + 81) - 0.5) * 0.6
+    jy = (cell_rand(gxi, gyi, wd.seed + 82) - 0.5) * 0.9 + (fbm(X * 3, Y * 3, 2, wd.seed + 83) - 0.5) * 0.6
+    fj = wd.fields(X + jx, Y + jy, 6)
+    fj["X"], fj["Y"] = X + jx, Y + jy
+    bj = wd.classify(fj, local=True)
+    swap = np.isin(b, BLEND_LAND) & np.isin(bj, BLEND_LAND)
+    b[swap] = bj[swap]
     # small lakes in wet low ground
     lake = (fbm(X / 0.7, Y / 0.7, 3, wd.seed + 21) > 0.74) & np.isin(b, ["swamp", "meadow", "forest", "tundra"])
     b[lake] = np.where(f["t"][lake] < 0.3, "seaice", "lake")
