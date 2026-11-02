@@ -225,7 +225,8 @@ class World:
         self.feats[k] = feats
         s = pygame.image.frombuffer(p.img.tobytes(), (CS * weird.TS, CS * weird.TS), "P")
         s.set_palette([tuple(c) for c in weird.palette(0)])
-        s = pygame.transform.scale(s, (CS * PX, CS * PX))
+        n = CS * PX
+        s = pygame.transform.scale(pygame.transform.scale(s, (n // weird.PIX, n // weird.PIX)), (n, n))   # crunch
         if len(self.surf) > 40:
             self.surf.clear()
         self.surf[k] = s
@@ -671,9 +672,16 @@ class Game:
             spr, m, kind = self.w.fsprites[key]
             amp = {"tuft": 2.5, "stalks": 2.0, "shroom": 1.0, "orbs": 1.5}.get(kind, 2.5)
             frames, pad = weird.sway_frames(spr, m, weird.palette(0), nf=8, amp=amp, bob=(kind == "orbs"))
-            surfs = [pygame.image.frombuffer(a.tobytes(), (a.shape[1], a.shape[0]), "RGBA").convert_alpha() for a in frames]
+            surfs = [self.crunch(pygame.image.frombuffer(a.tobytes(), (a.shape[1], a.shape[0]), "RGBA")) for a in frames]
             self.live_cache[key] = (surfs, pad)
         return self.live_cache[key]
+
+    def crunch(self, srf):
+        """same chunky pixels as the ground"""
+        w, h = srf.get_size()
+        q = weird.PIX
+        small = pygame.transform.scale(srf, (max(1, w // q), max(1, h // q)))
+        return pygame.transform.scale(small, (w, h)).convert_alpha()
 
     def glow_frames(self):
         if not hasattr(self, "_glow"):
@@ -693,7 +701,7 @@ class Game:
         """grass and trees swaying (a gust rolls across the land), fires flickering; returns firelight spots"""
         if not hasattr(self, "live_cache"):
             self.live_cache = {}
-            self.fire_surfs = [pygame.image.frombuffer(a.tobytes(), (a.shape[1], a.shape[0]), "RGBA").convert_alpha()
+            self.fire_surfs = [self.crunch(pygame.image.frombuffer(a.tobytes(), (a.shape[1], a.shape[0]), "RGBA"))
                                for a in weird.fire_frames(11)]
         fires = []
         top, bottom = HUD_H - 90, HUD_H + vh + 10

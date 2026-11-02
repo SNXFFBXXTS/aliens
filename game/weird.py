@@ -10,6 +10,7 @@ import numpy as np
 T = 16          # design grid the generators think in
 RES = 2         # drawn at twice that: thin 1-pixel lines, fine specks
 TS = T * RES    # tile size in pixels
+PIX = 3         # final look: everything shrunk by this and blown back up (chunky, slightly broken pixels)
 BIG = {"canopy": 4, "spire": 4, "coral": 4, "eye": 4, "shroom": 4, "bulb": 4, "peak": 4, "hut": 4, "shard": 3}
 _res = RES      # resolution the generators are drawing at right now (BIG kinds draw at 4 = 64 px)
 
@@ -67,14 +68,14 @@ def palette(t=0.0):
         for k in range(NS):
             c = r[k]
             if f in ("sea", "lava") and k >= 2:                     # flowing shimmer: shades rotate
-                sp = 5 if f == "sea" else 7
+                sp = 2 if f == "sea" else 3
                 c = r[2 + (k - 2 + int(t * sp)) % (NS - 2)]
             elif f in ("spore", "prism"):                           # hue drift
                 h, l, s = colorsys.rgb_to_hls(*(c / 255))
-                h = (h + (t * 0.08 if f == "prism" else 0.06 * math.sin(t * 0.9))) % 1
+                h = (h + (t * 0.006 if f == "prism" else 0.05 * math.sin(t * 0.12))) % 1   # slow drift
                 c = np.array(colorsys.hls_to_rgb(h, l, s)) * 255
-            elif f in ("lumen", "bog") and k >= 4:                  # breathing glow
-                c = c * (0.8 + 0.2 * math.sin(t * 1.6 + k))
+            elif f in ("lumen", "bog") and k >= 4:                  # breathing glow, slow
+                c = c * (0.9 + 0.1 * math.sin(t * 0.35 + k))
             pal[F(f, k)] = np.clip(c, 0, 255)
     return pal
 
@@ -839,10 +840,10 @@ def flow_bands(p, B, m, cs, seed, ox=0, oy=0):
     p.img[dirt] = dirtshades[np.clip((v[dirt] * 4.2).astype(int), 1, 5)]
     rut = dirt & (np.abs(rd - 0.335) < 0.011) & (g > 0.12)
     p.img[rut] = dirtshades[np.where(g[rut] > 0.6, 0, 1)]
-    pud = dirt & (big > 0.74) & (small > 0.52)
-    p.img[pud] = F("sea", 2)
+    pud = dirt & (big > 0.74) & (small > 0.52)                 # wet mud, with a dull glint on its near edge
+    p.img[pud] = dirtshades[0]
     rim = pud & ~np.roll(pud, 1, 0)
-    p.img[rim] = F("sea", 5)
+    p.img[rim] = F("cobble", 3)
 
     # footpaths: narrow, scruffy
     path = (tr + ragged > 0.24) & ~band & ~water
