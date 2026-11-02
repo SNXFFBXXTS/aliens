@@ -1,7 +1,9 @@
 # Roguelike (working title)
 
 User: EndeavourOS + KDE Plasma (Wayland), fish shell, kitty. Short plain answers, one command at a time.
-Goal: standalone 2D roguelike, Caves of Qud-inspired *look* (own art, never copied), Stone Soup-style depth:
+Direction (Nov 2026): RimWorld x Cowboy Bebop x Project Zomboid. Start stranded on a planet, scavenge/survive,
+build a ship to get to space, then the game opens up. Still in the graphics/feel phase.
+Original goal: standalone 2D roguelike, Caves of Qud-inspired *look* (own art, never copied), Stone Soup-style depth:
 huge generated world, thousands of spells/items, towns, shops, roads; places are random until visited, then permanent.
 
 ## Run
@@ -19,6 +21,15 @@ Headless test: `RL_HOME=/tmp/x SDL_VIDEODRIVER=dummy python3 game/rl.py --seed 1
 - `mobs.py` creatures: species per biome from the seed (sprite, name, stats, temper), spawning, movement.
 - `rl.py` the game: chunks loaded/saved, turn loop, bump combat, XP/levels, death/respawn, HUD, world map (M).
 - `art.py` old palette/bitmaps (hero sprite still comes from here).
+
+## Look (current)
+Zones: 1 world square = 40x40 cells (proto.ZS), world map = travel screen (M, arrows, M/Enter zooms in).
+Art drawn at 2x (weird.RES, 32px cells); trees/huts/peaks/shards are BIG (weird.BIG, up to 64px) and drawn after
+the ground: all shadows first (weird.SHADE darkens, never blackens), then bodies back to front; trees from
+neighbouring zones that lean over the border are drawn too (weird.pick_big). Ground = dark grainy tint of the
+biome colour. Zomboid-style vision cone (rl.update_view: far ahead, 2.3 cells round you), soft darkness edges
+(smoothscale). Sound minimal and quiet (immersion.SOUND_VERSION; one bed per zone, not per step).
+User wants: minimal but immersive, sparse dim trees, no wading through rivers/lakes.
 
 ## Done so far
 World + biomes + rivers/towns/roads, weird look (user: "sparse and dim" flora), walking, permanence, creatures + combat.

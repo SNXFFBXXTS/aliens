@@ -50,6 +50,13 @@ def F(fam, k):
     return 8 + FAMS.index(fam) * NS + k
 
 
+SHADE = np.zeros(256, np.uint8)            # palette index -> the same thing in shadow
+for _f in range(len(FAM_DEF)):
+    for _k in range(NS):
+        _i = 8 + _f * NS + _k
+        SHADE[_i] = 0 if _k <= 1 else 8 + _f * NS + max(0, _k - 3)
+
+
 def palette(t=0.0):
     pal = np.zeros((256, 3), np.uint8)
     for f in FAMS:
@@ -402,14 +409,16 @@ class Painter8:
         for ox, oy in ((0, 0), (1, 0), (0, 1)):           # thicken so it reads as a solid shape
             X, Y = sx + ox, sy + oy
             ok = (X >= 0) & (X < TS) & (Y >= 0) & (Y < TS)
-            c[Y[ok], X[ok]] = 0
+            c[Y[ok], X[ok]] = SHADE[c[Y[ok], X[ok]]]
 
-    def big(self, x, y, spr, m, dx=0):
-        """a sprite bigger than its cell: bottom-centre on the cell's bottom-centre, with its long shadow"""
+    def _origin(self, x, y, spr, dx):
         n = spr.shape[0]
+        return x * TS + TS // 2 - n // 2 + dx, (y + 1) * TS - n
+
+    def big_shadow(self, x, y, spr, dx=0):
+        """the long shadow of a big sprite: its silhouette sheared down-right; darkens what's beneath"""
+        x0, y0 = self._origin(x, y, spr, dx)
         H, W = self.img.shape
-        x0 = x * TS + TS // 2 - n // 2 + dx
-        y0 = (y + 1) * TS - n
         ys, xs = np.nonzero(spr != ".")
         if not len(ys):
             return
@@ -417,15 +426,31 @@ class Painter8:
         h = base - ys
         sx = np.round(xs + h * 0.7 + 3).astype(int) + x0
         sy = np.round(base - h * 0.3 + 1).astype(int) + y0
+        pts = set()
         for ox, oy in ((0, 0), (1, 0), (0, 1), (1, 1)):
             X, Y = sx + ox, sy + oy
             ok = (X >= 0) & (X < W) & (Y >= 0) & (Y < H)
-            self.img[Y[ok], X[ok]] = 0
+            pts.update(zip(Y[ok].tolist(), X[ok].tolist()))
+        if pts:
+            Y, X = np.array(list(pts)).T
+            self.img[Y, X] = SHADE[self.img[Y, X]]
+
+    def big_body(self, x, y, spr, m, dx=0):
+        x0, y0 = self._origin(x, y, spr, dx)
+        H, W = self.img.shape
         for ch, idx in m.items():
             yy, xx = np.nonzero(spr == ch)
             X, Y = xx + x0, yy + y0
             ok = (X >= 0) & (X < W) & (Y >= 0) & (Y < H)
             self.img[Y[ok], X[ok]] = idx
+
+    def draw_big(self, items):
+        """all the shadows first, then the bodies back to front, so no shadow cuts across a tree"""
+        items = sorted(items, key=lambda it: (it[1], it[0]))
+        for (x, y, spr, m, dx) in items:
+            self.big_shadow(x, y, spr, dx)
+        for (x, y, spr, m, dx) in items:
+            self.big_body(x, y, spr, m, dx)
 
     def stamp(self, x, y, st, idx, px, py):
         c = self.cell(x, y)
@@ -499,6 +524,26 @@ def paint(p, sp, x, y, b, r, local=True, defer=None):
             p.sprite(x, y, spr, m, dx=dx)
             return
         roll -= dens
+
+
+def pick_big(sp, b, r):
+    """the big sprite (tree/hut/peak) this cell grows, if any: (sprite, colours, dx) or None.
+    Same rolls as paint(), so a zone can draw its neighbours' trees that lean over the border."""
+    if b in WATER or b in ("seaice", "lava", "bridge", "crust"):
+        return None
+    fam, acc, kinds, marks = BIOMES.get(b, ("stone", None, [], 1))
+    rr = lambda i: float(r[i % len(r)])
+    pk = lambda i, n: int(rr(i) * n) % n
+    roll = rr(5)
+    for kind, dens in kinds:
+        dens = dens * 0.32
+        if roll < dens:
+            if kind not in BIG:
+                return None
+            m = {"1": F(fam, 4), "2": F(fam, 2), "3": F(acc, 5) if acc else F(fam, 5)}
+            return sp.get(b, kind, pk(6, 8), big=True), m, pk(7, 9) - 4
+        roll -= dens
+    return None
 
 
 def to_rgb(img8, t=0.0):

@@ -155,8 +155,18 @@ class World:
         for y in range(CS):
             for x in range(CS):
                 weird.paint(p, self.species, x, y, b[y, x], R[y, x], defer=big)
-        for (x, y, spr, m, dx) in big:                  # trees and huts overlap the ground round them
-            p.big(x, y, spr, m, dx)
+        # trees from the zones next door that lean over the border
+        for y in range(-1, CS + 3):
+            for x in range(-2, CS + 2):
+                if 0 <= x < CS and 0 <= y < CS:
+                    continue
+                gx, gy = cx * CS + x, cy * CS + y
+                if not self.inside(gx // CS, gy // CS):
+                    continue
+                hit = weird.pick_big(self.species, self.cell(gx, gy), proto.rnd_cells(np.array(gx), np.array(gy), self.seed + 99))
+                if hit:
+                    big.append((x, y) + hit)
+        p.draw_big(big)                                  # trees and huts overlap the ground round them
         s = pygame.image.frombuffer(p.img.tobytes(), (CS * weird.TS, CS * weird.TS), "P")
         s.set_palette([tuple(c) for c in weird.palette(0)])
         s = pygame.transform.scale(s, (CS * PX, CS * PX))
@@ -279,6 +289,9 @@ class Game:
     def act(self, dx, dy):
         if self.show_map or self.dead:
             return
+        if getattr(self, "facing", None) != (dx, dy):
+            self.facing = (dx, dy)
+            self.update_view()                   # turning to look is free
         nx, ny = self.px + dx, self.py + dy
         m = self.w.mob_at(nx, ny)
         if m:
@@ -438,7 +451,16 @@ class Game:
         day, phase, r, tint = im.daytime(self.turn)
         r = min(r, im.THICK.get(self.here, 99))
         self.radius = r
-        self.vis = im.fov(self.px, self.py, r, self.w.cell)
+        full = im.fov(self.px, self.py, r, self.w.cell)
+        fx, fy = getattr(self, "facing", (0, 1))
+        fl = (fx * fx + fy * fy) ** 0.5 or 1
+        def in_cone(x, y):                       # Zomboid-style: far ahead, only close round you and behind
+            vx, vy = x - self.px, y - self.py
+            d2 = vx * vx + vy * vy
+            if d2 <= 2.3 ** 2:
+                return True
+            return (vx * fx + vy * fy) / (d2 ** 0.5 * fl) >= 0.42
+        self.vis = {q for q in full if in_cone(*q)}
         self.w.remember(self.vis)
         self.dark = None
         self.amb.area(self.zone_mood(), phase == "Night")
@@ -535,7 +557,7 @@ class Game:
         for m in self.w.mobs.values():
             x, y = m.x * PX - cxp, m.y * PX - cyp + HUD_H
             if (m.x, m.y) in self.vis and -PX < x < sw and HUD_H - PX < y < HUD_H + vh:
-                pygame.draw.rect(self.screen, (0, 0, 0), (x + 2, y + 2, PX - 4, PX - 4))
+                self.screen.blit(self.foot_shadow(), (x + 4, y + PX - 9))
                 spr = self.mob_sprite(m)
                 if now - self.flash.get(m.id, 0) < 0.15:
                     spr = spr.copy(); spr.fill((255, 255, 255), special_flags=pygame.BLEND_RGB_MAX)
@@ -545,7 +567,7 @@ class Game:
                     pygame.draw.rect(self.screen, (230, 50, 50), (x + 3, y - 3, int((PX - 6) * m.hp / m.maxhp), 3))
         self.screen.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), HUD_H - (cyp % PX)))
         hx, hy = self.px * PX - cxp, self.py * PX - cyp + HUD_H
-        pygame.draw.rect(self.screen, (0, 0, 0), (hx + 2, hy + 2, PX - 4, PX - 4))
+        self.screen.blit(self.foot_shadow(), (hx + 4, hy + PX - 9))
         self.screen.blit(self.hero, (hx, hy))
         self.screen.set_clip(None)
         if now - self.flash.get("you", 0) < 0.2:           # red flash when you're hurt
@@ -553,9 +575,16 @@ class Game:
             ov.fill((200, 0, 0, 60))
             self.screen.blit(ov, (0, HUD_H))
 
+    def foot_shadow(self):
+        if not hasattr(self, "_foot"):
+            s = pygame.Surface((PX - 8, 8), pygame.SRCALPHA)
+            pygame.draw.ellipse(s, (0, 0, 0, 150), s.get_rect())
+            self._foot = s
+        return self._foot
+
     def darkness(self, cxp, cyp, sw, vh):
         """black where you've never looked, dim where you remember, a soft falloff and the time-of-day tint where you see"""
-        key = (cxp, cyp, sw, vh, self.turn, self.px, self.py)
+        key = (cxp, cyp, sw, vh, self.turn, self.px, self.py, getattr(self, "facing", None))
         if self.dark and self.dark[0] == key:
             return self.dark[1]
         x0, y0 = cxp // PX, cyp // PX
@@ -574,7 +603,7 @@ class Game:
                 else:
                     a[j, i] = (0, 0, 0, 255)
         srf = pygame.image.frombuffer(a.tobytes(), (cols, rows), "RGBA")
-        srf = pygame.transform.scale(srf, (cols * PX, rows * PX))
+        srf = pygame.transform.smoothscale(srf, (cols * PX, rows * PX))      # soft edges, no hard blocks
         self.dark = (key, srf)
         return srf
 
