@@ -617,7 +617,7 @@ class Game:
 
     def acid(self, t, now, w, h):
         """post effects on the view: ghost trails, colour split, melting waves, glitches, the eye"""
-        lvl = getattr(self, "trip", 2)
+        lvl = getattr(self, "trip", 0)
         if lvl == 0:
             self._ghost = None
             return
@@ -721,7 +721,7 @@ class Game:
             elif k in (pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_MINUS, pygame.K_MINUS):
                 self.set_zoom(+1 if k in (pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_PLUS) else -1)
             elif k == pygame.K_t:
-                self.trip = (getattr(self, "trip", 2) + 1) % 4
+                self.trip = (getattr(self, "trip", 0) + 1) % 4
                 self.say(["Trip off. Everything is ordinary. Suspiciously ordinary.", "Trip: mild.", "Trip: strong.",
                           "Trip: full send."][self.trip])
             elif k == pygame.K_n:
@@ -767,7 +767,7 @@ class Game:
         c0x, c0y = cxp // (CS * PX), cyp // (CS * PX)
         c1x, c1y = (cxp + sw) // (CS * PX), (cyp + vh) // (CS * PX)
         S.set_clip(pygame.Rect(0, top, sw, vh))
-        pal = [tuple(c) for c in weird.palette(t, getattr(self, "trip", 2))]   # colours cycle every frame
+        pal = [tuple(c) for c in weird.palette(t, getattr(self, "trip", 0))]   # colours cycle every frame
         for cy in range(c0y, c1y + 1):
             for cx in range(c0x, c1x + 1):
                 srf = self.w.surface(cx, cy)

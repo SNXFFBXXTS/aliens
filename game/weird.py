@@ -406,13 +406,222 @@ def g_tuft(rng):
     return c
 
 
+# ── the insane ones ──
+def g_hand(rng):
+    """a tree that is a hand: a wrist trunk, knuckled fingers, glowing nails"""
+    c = canvas(); lean = rng.uniform(-0.6, 0.6)
+    for x in np.arange(6.5, 9.01, 1 / _res):
+        line(c, x, 15, x + lean, 9, "2")
+    for x in np.arange(5, 10.51, 1 / _res):
+        line(c, x + lean, 9, x + lean * 1.1, 7, "1")
+    for k, (a, L) in enumerate(zip(np.linspace(-0.9, 0.9, 5), rng.uniform(3.5, 6, 5))):
+        bx, by = 7.75 + lean + math.sin(a) * 2.5, 7.2
+        curl = rng.uniform(-0.5, 0.5)
+        px, py = bx, by
+        for st in range(1, 4):
+            nx, ny = bx + math.sin(a + curl * st) * L * st / 3, by - math.cos(a + curl * st) * L * st / 3
+            for o in (-0.3, 0, 0.3):
+                line(c, px + o, py, nx + o, ny, "1")
+            put(c, nx, ny, "2")                                    # knuckle
+            px, py = nx, ny
+        disc(c, px, py, 0.55, "3")                                 # nail
+    if rng.random() < 0.5:
+        disc(c, 7.75 + lean, 9.5, 1.1, "3"); put(c, 7.75 + lean, 9.5, "2")   # an eye in the palm
+    return c
+
+
+def g_eyestalk(rng):
+    """a bunch of stalks, each ending in a staring eyeball"""
+    c = canvas()
+    for _ in range(rng.integers(3, 7)):
+        x0, h, bend = rng.uniform(4, 11), rng.uniform(5, 13), rng.uniform(-3, 3)
+        px, py = x0, 15
+        for st in range(1, 11):
+            u = st / 10
+            x, y = x0 + bend * u * u, 15 - h * u
+            line(c, px, py, x, y, "2"); px, py = x, y
+        r = rng.uniform(1.1, 1.9)
+        disc(c, px, py, r, "1"); disc(c, px + rng.uniform(-0.4, 0.4), py, r * 0.55, "3"); disc(c, px, py, r * 0.25, "2")
+    return c
+
+
+def g_jelly(rng):
+    """a floating jellyfish bell trailing long tendrils"""
+    c = canvas(); cy, r = rng.uniform(3, 5.5), rng.uniform(3.5, 5.5)
+    for y in FINE:
+        for x in FINE:
+            if y <= cy and (x - 7.5) ** 2 + ((y - cy) * 1.4) ** 2 <= r * r:
+                put(c, x, y, "1" if (x - 7.5) ** 2 + ((y - cy) * 1.4) ** 2 < (r * 0.75) ** 2 else "3")
+    for x in np.linspace(7.5 - r + 0.8, 7.5 + r - 0.8, rng.integers(4, 8)):
+        ph, L = rng.uniform(0, 6), rng.uniform(5, 10)
+        px, py = x, cy + 0.3
+        for st in range(1, 16):
+            u = st / 15
+            nx, ny = x + math.sin(ph + u * 7) * 0.9, cy + 0.3 + L * u
+            line(c, px, py, nx, ny, "2" if st % 4 else "3"); px, py = nx, ny
+    return c
+
+
+def g_spiral(rng):
+    """a trunk that winds up into a huge spiral of leaves"""
+    c = canvas(); turns = rng.uniform(2.2, 3.4); r0 = rng.uniform(5, 6.5); cx, cy = 7.5, 6.5
+    line(c, 7.5, 15, 7.5, 10, "2"); line(c, 8, 15, 8, 10, "2")
+    prev = None
+    for a in np.linspace(0, turns * 6.283, 300):
+        rr = r0 * (1 - a / (turns * 6.283)) + 0.3
+        x, y = cx + math.cos(a) * rr, cy + math.sin(a) * rr * 0.9
+        if prev:
+            line(c, prev[0], prev[1], x, y, "1")
+            if int(a * 3) % 7 == 0:
+                put(c, x, y, "3")
+        prev = (x, y)
+    disc(c, cx, cy, 0.8, "3")
+    return c
+
+
+def g_mouth(rng):
+    """a swollen trunk split by a mouth full of teeth"""
+    c = canvas(); w, top = rng.uniform(3.5, 5), rng.uniform(2.5, 5)
+    for y in np.arange(top, 15.01, 1 / _res):
+        ww = w * math.sin(math.pi * (y - top + 0.5) / (15.5 - top)) + 0.8
+        line(c, 7.5 - ww, y, 7.5 + ww, y, "1")
+    my, mh = top + (15 - top) * 0.45, rng.uniform(1.2, 2.2)
+    for y in np.arange(my - mh, my + mh, 1 / _res):
+        hw = (w * 0.8) * math.sqrt(max(0, 1 - ((y - my) / mh) ** 2))
+        line(c, 7.5 - hw, y, 7.5 + hw, y, "2")
+    for x in np.arange(7.5 - w * 0.7, 7.5 + w * 0.7, 0.9):     # teeth top and bottom
+        line(c, x, my - mh + 0.2, x + 0.3, my - mh * 0.3, "3")
+        line(c, x + 0.4, my + mh - 0.2, x + 0.6, my + mh * 0.3, "3")
+    for k in range(rng.integers(1, 3)):
+        ex = 7.5 + rng.uniform(-w * 0.5, w * 0.5)
+        disc(c, ex, top + 1.6, 0.8, "3"); put(c, ex, top + 1.6, "2")
+    return c
+
+
+def g_tentacle(rng):
+    """tentacles rising out of the ground, curling, with suckers"""
+    c = canvas()
+    for _ in range(rng.integers(2, 5)):
+        x0, h, ph, curl = rng.uniform(3, 12), rng.uniform(7, 13), rng.uniform(0, 6), rng.uniform(1.5, 3.5)
+        pts = []
+        for st in range(41):
+            u = st / 40
+            w = 1.3 * (1 - u) + 0.2
+            x = x0 + math.sin(ph + u * curl) * 2.2 * u
+            y = 15 - h * u
+            if u > 0.8:
+                a = (u - 0.8) * 25
+                x += math.cos(a) * 1.2 * (u - 0.8) * 5; y += math.sin(a) * 1.2 * (u - 0.8) * 5
+            pts.append((x, y, w))
+        for (x, y, w) in pts:
+            line(c, x - w, y, x + w, y, "1")
+        for k, (x, y, w) in enumerate(pts[3:30:4]):
+            put(c, x + w * 0.6, y, "3")
+    return c
+
+
+def g_brain(rng):
+    """a brain-like blob of folds on a short stalk"""
+    c = canvas(); cy, r = rng.uniform(6, 8), rng.uniform(4.5, 6.2)
+    line(c, 7.5, 15, 7.5, cy + r * 0.6, "2"); line(c, 8, 15, 8, cy + r * 0.6, "2")
+    disc(c, 7.5, cy, r, "1")
+    ph = rng.uniform(0, 6)
+    for py in range(c.shape[0]):
+        for px in range(c.shape[1]):
+            if c[py, px] == "1":
+                x, y = px / _res, py / _res
+                v = math.sin(x * 2.1 + math.sin(y * 1.7 + ph) * 2) + math.sin(y * 2.3 + math.cos(x * 1.3) * 2)
+                if abs(v) < 0.18:
+                    c[py, px] = "2"
+    put(c, 7.5 - r * 0.4, cy - r * 0.3, "3"); put(c, 7.5 + r * 0.3, cy - r * 0.5, "3")
+    return c
+
+
+def g_cubes(rng):
+    """cubes floating in a slow tumble over a cracked stump"""
+    c = canvas()
+    for x in np.arange(6, 9.01, 1 / _res):
+        line(c, x, 15, x, 13.5, "2")
+    for _ in range(rng.integers(3, 6)):
+        cx, cy, s = rng.uniform(4, 11), rng.uniform(2, 11), rng.uniform(1.2, 2.4)
+        for y in np.arange(cy - s, cy + s, 1 / _res):
+            line(c, cx - s, y, cx + s, y, "1")
+        line(c, cx - s, cy - s, cx + s, cy - s, "3"); line(c, cx - s, cy - s, cx - s, cy + s, "3")
+        line(c, cx + s, cy - s, cx + s, cy + s, "2"); line(c, cx - s, cy + s, cx + s, cy + s, "2")
+    return c
+
+
+def g_ring(rng):
+    """halos hanging over a thin stalk"""
+    c = canvas(); top = rng.uniform(3, 6)
+    line(c, 7.5, 15, 7.5, top + 3, "2")
+    for k in range(rng.integers(1, 4)):
+        r = rng.uniform(2, 4.5) * (1 - k * 0.25); cy = top - k * 1.5 + 2
+        for a in np.linspace(0, 6.283, 120):
+            put(c, 7.5 + math.cos(a) * r, cy + math.sin(a) * r * 0.4, "3" if k == 0 else "1")
+    return c
+
+
+def g_totem(rng):
+    """a stack of faces, eyes and open mouths"""
+    c = canvas(); n = rng.integers(3, 5); h = 13 / n
+    for k in range(n):
+        y0 = 15 - (k + 1) * h; w = rng.uniform(2, 3.2)
+        for y in np.arange(y0, y0 + h - 0.3, 1 / _res):
+            line(c, 7.5 - w, y, 7.5 + w, y, "1")
+        ey = y0 + h * 0.35
+        for ex in (7.5 - w * 0.45, 7.5 + w * 0.45):
+            disc(c, ex, ey, 0.55, "3"); put(c, ex, ey, "2")
+        line(c, 7.5 - w * 0.5, y0 + h * 0.72, 7.5 + w * 0.5, y0 + h * 0.72, "2")
+    return c
+
+
+def g_melt(rng):
+    """a tree whose crown is melting off it in long drips"""
+    c = canvas(); cx, cy, r = 7.5 + rng.uniform(-1, 1), rng.uniform(4, 5.5), rng.uniform(3.5, 5)
+    line(c, 7.5, 15, cx, cy + 1, "2"); line(c, 8.2, 15, cx + 0.7, cy + 1, "2")
+    disc(c, cx, cy, r, "1", rng, 0.05)
+    for _ in range(rng.integers(6, 11)):
+        x = cx + rng.uniform(-r, r) * 0.9
+        L = rng.uniform(2, 9)
+        for y in np.arange(cy + r * 0.6, min(15, cy + r * 0.6 + L), 1 / _res):
+            put(c, x, y, "1")
+        disc(c, x, min(15, cy + r * 0.6 + L), 0.6, "3")
+    return c
+
+
+def g_chandelier(rng):
+    """an arching stem hung with glowing bulbs, like a chandelier grown out of the ground"""
+    c = canvas(); top = rng.uniform(1.5, 3)
+    for side in (-1, 1):
+        prev = None
+        for a in np.linspace(0, 1, 40):
+            x = 7.5 + side * 6 * math.sin(a * math.pi * 0.5)
+            y = 15 - (15 - top) * math.sin(a * math.pi * 0.9 + 0.1)
+            if prev:
+                line(c, prev[0], prev[1], x, y, "2")
+            prev = (x, y)
+    for k in range(rng.integers(5, 9)):
+        x = rng.uniform(2, 13); L = rng.uniform(1, 6)
+        line(c, x, top + 1, x, top + 1 + L, "1")
+        disc(c, x, top + 1.6 + L, rng.uniform(0.6, 1.1), "3")
+    return c
+
+
+WEIRD = ("hand", "eyestalk", "jelly", "spiral", "mouth", "tentacle", "brain", "cubes", "ring", "totem", "melt", "chandelier")
+NEON = ("eye", "bloom", "lumen", "prism", "blood", "lava", "frost", "spore")
+
 GEN = {"spire": g_spire, "canopy": g_canopy, "coral": g_coral, "bulb": g_bulb, "eye": g_eye, "stalks": g_stalks,
        "shroom": g_shroom, "shard": g_shard, "ribs": g_ribs, "orbs": g_orbs, "rock": g_rock, "peak": g_peak,
        "hut": g_hut, "cone": g_cone, "willow": g_willow, "tiers": g_tiers, "twist": g_twist, "fronds": g_fronds,
-       "spikes": g_spikes, "pillar": g_pillar, "tuft": g_tuft}
+       "spikes": g_spikes, "pillar": g_pillar, "tuft": g_tuft, "hand": g_hand, "eyestalk": g_eyestalk,
+       "jelly": g_jelly, "spiral": g_spiral, "mouth": g_mouth, "tentacle": g_tentacle, "brain": g_brain, "cubes": g_cubes,
+       "ring": g_ring, "totem": g_totem, "melt": g_melt, "chandelier": g_chandelier}
+BIG.update({k: 4 for k in WEIRD})
 BIG.update({"willow": 4, "tiers": 4, "twist": 4, "fronds": 4, "spikes": 4, "pillar": 4})
 # drawn live every frame (they sway); everything else is painted into the ground once
-SWAY = {"canopy", "spire", "coral", "eye", "shroom", "bulb", "willow", "tiers", "twist", "fronds", "stalks", "tuft", "orbs"}
+SWAY = {"canopy", "spire", "coral", "eye", "shroom", "bulb", "willow", "tiers", "twist", "fronds", "stalks", "tuft", "orbs",
+        "hand", "eyestalk", "jelly", "spiral", "tentacle", "brain", "ring", "melt", "chandelier", "mouth"}
 # how much of the listed density shows up in a zone (trees thinned out; rock, peaks, grass, fire as listed)
 THIN = {"tuft": 1.0, "rock": 1.0, "peak": 1.0, "hut": 1.0, "cone": 1.0, "fire": 1.0, "shard": 0.6}
 
@@ -420,25 +629,25 @@ PROP_COLOURS = {}      # filled in by structures.py: "p_name" -> colours for '1'
 
 # biome: family, accent family for '3' (None = own), [(kind, density)], ground marks per cell
 BIOMES = {
-    "grass": ("moss", None, [("tuft", 0.45), ("stalks", 0.1), ("twist", 0.05), ("spire", 0.04)], 2),
-    "meadow": ("bloom", None, [("tuft", 0.4), ("stalks", 0.15), ("willow", 0.08), ("bulb", 0.05)], 2),
-    "savanna": ("ochre", None, [("tuft", 0.5), ("fronds", 0.08), ("spire", 0.05), ("spikes", 0.04)], 2),
-    "forest": ("witch", "eye", [("canopy", 0.25), ("tiers", 0.14), ("willow", 0.1), ("twist", 0.08), ("spire", 0.08),
+    "grass": ("moss", None, [("spiral", 0.03), ("ring", 0.02), ("totem", 0.01), ("tuft", 0.45), ("stalks", 0.1), ("twist", 0.05), ("spire", 0.04)], 2),
+    "meadow": ("bloom", None, [("eyestalk", 0.04), ("spiral", 0.04), ("chandelier", 0.03), ("tuft", 0.4), ("stalks", 0.15), ("willow", 0.08), ("bulb", 0.05)], 2),
+    "savanna": ("ochre", None, [("hand", 0.03), ("totem", 0.02), ("tuft", 0.5), ("fronds", 0.08), ("spire", 0.05), ("spikes", 0.04)], 2),
+    "forest": ("witch", "eye", [("hand", 0.06), ("melt", 0.06), ("eyestalk", 0.04), ("canopy", 0.25), ("tiers", 0.14), ("willow", 0.1), ("twist", 0.08), ("spire", 0.08),
                                 ("eye", 0.04), ("tuft", 0.12)], 1),
-    "jungle": ("lumen", None, [("coral", 0.22), ("fronds", 0.2), ("bulb", 0.15), ("canopy", 0.1), ("tuft", 0.2)], 2),
-    "swamp": ("bog", None, [("tuft", 0.25), ("stalks", 0.25), ("willow", 0.12), ("bulb", 0.08)], 2),
-    "taiga": ("frost", None, [("tiers", 0.4), ("spire", 0.12), ("shard", 0.05)], 1),
-    "tundra": ("ice", None, [("tuft", 0.12), ("shard", 0.08), ("spikes", 0.04)], 1),
+    "jungle": ("lumen", None, [("tentacle", 0.07), ("jelly", 0.06), ("mouth", 0.05), ("chandelier", 0.05), ("coral", 0.22), ("fronds", 0.2), ("bulb", 0.15), ("canopy", 0.1), ("tuft", 0.2)], 2),
+    "swamp": ("bog", None, [("tentacle", 0.08), ("melt", 0.06), ("eyestalk", 0.04), ("tuft", 0.25), ("stalks", 0.25), ("willow", 0.12), ("bulb", 0.08)], 2),
+    "taiga": ("frost", None, [("hand", 0.04), ("ring", 0.03), ("tiers", 0.4), ("spire", 0.12), ("shard", 0.05)], 1),
+    "tundra": ("ice", None, [("ring", 0.04), ("cubes", 0.03), ("tuft", 0.12), ("shard", 0.08), ("spikes", 0.04)], 1),
     "icesheet": ("ice", None, [("shard", 0.3)], 1), "drift": ("ice", None, [("shard", 0.12), ("rock", 0.06)], 2),
-    "desert": ("dune", None, [("pillar", 0.05), ("ribs", 0.03), ("spikes", 0.02), ("shard", 0.015)], 2),
+    "desert": ("dune", None, [("mouth", 0.03), ("totem", 0.03), ("cubes", 0.02), ("pillar", 0.05), ("ribs", 0.03), ("spikes", 0.02), ("shard", 0.015)], 2),
     "salt": ("salt", None, [("shard", 0.12)], 2),
-    "badlands": ("rust", None, [("pillar", 0.1), ("spikes", 0.08), ("ribs", 0.04)], 2),
-    "hills": ("moss", None, [("tuft", 0.3), ("rock", 0.1), ("twist", 0.04), ("stalks", 0.06)], 2),
+    "badlands": ("rust", None, [("totem", 0.05), ("hand", 0.03), ("pillar", 0.1), ("spikes", 0.08), ("ribs", 0.04)], 2),
+    "hills": ("moss", None, [("ring", 0.02), ("spiral", 0.02), ("tuft", 0.3), ("rock", 0.1), ("twist", 0.04), ("stalks", 0.06)], 2),
     "mountain": ("stone", None, [("peak", 0.5), ("rock", 0.35)], 1), "peak": ("stone", "ice", [("peak", 0.8), ("rock", 0.2)], 1),
-    "ash": ("ash", "lava", [("fire", 0.02), ("spikes", 0.1), ("ribs", 0.04), ("rock", 0.05)], 2),
+    "ash": ("ash", "lava", [("melt", 0.05), ("brain", 0.03), ("hand", 0.02), ("fire", 0.02), ("spikes", 0.1), ("ribs", 0.04), ("rock", 0.05)], 2),
     "crust": ("ash", "lava", [("fire", 0.03)], 1), "volcano": ("ash", "lava", [("cone", 1.0)], 1),
-    "fungal": ("spore", None, [("shroom", 0.3), ("orbs", 0.14), ("bulb", 0.06), ("tuft", 0.1)], 2),
-    "crystal": ("prism", None, [("shard", 0.45)], 2),
+    "fungal": ("spore", None, [("jelly", 0.1), ("brain", 0.08), ("spiral", 0.06), ("eyestalk", 0.06), ("shroom", 0.3), ("orbs", 0.14), ("bulb", 0.06), ("tuft", 0.1)], 2),
+    "crystal": ("prism", None, [("cubes", 0.12), ("ring", 0.07), ("shard", 0.45)], 2),
     "beach": ("salt", None, [("tuft", 0.08), ("fronds", 0.03)], 1),
     "trail": ("brick", None, [], 2),
     "road": ("brick", None, [], 3), "plaza": ("brick", None, [], 3), "house": ("brick", "eye", [("hut", 1.0)], 0),
@@ -748,7 +957,11 @@ def pick(sp, b, r, local=True):
             if kind == "fire":
                 return ("fire", None, m, 0, False)
             big = local and kind in BIG
-            spr = sp.get(b, kind, pk(6, 12), big=big)
+            var = pk(6, 12)
+            if kind in WEIRD:                                     # its own neon, the same for the whole species
+                m = dict(m)
+                m["3"] = F(NEON[zlib.crc32(f"{sp.seed}{b}{kind}{var}".encode()) % len(NEON)], 6)
+            spr = sp.get(b, kind, var, big=big)
             dx = (pk(7, 9) - 4) if big else ((pk(7, 5) - 2) if local else 0)
             return (kind, spr, m, dx, big)
         roll -= dens
