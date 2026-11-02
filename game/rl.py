@@ -188,7 +188,8 @@ class World:
                         weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing")
                 else:
                     weird.paint(p, self.species, x, y, c, R[y, x], defer=items)
-        weird.flow_bands(p, B, M, CS, (cx * 7919 + cy * 104729 + self.seed) & 0xFFFFFFFF)
+        weird.flow_bands(p, B, M, CS, (cx * 7919 + cy * 104729 + self.seed) & 0xFFFFFFFF,
+                         ox=cx * CS * weird.TS, oy=cy * CS * weird.TS)
         # big things from the zones next door that lean over the border: their shadows (and rocks/peaks) belong here too
         nb = []
         for y in range(-1, CS + 3):

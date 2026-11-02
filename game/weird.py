@@ -24,6 +24,9 @@ FAM_DEF = {   # dark, mid, bright
     "ash": ("#0a0808", "#5a5250", "#cfc6c0"), "spore": ("#12031a", "#9a2ac8", "#ffa8ff"),
     "prism": ("#06041a", "#4a8ad8", "#ffffff"), "brick": ("#120a04", "#9a6a3a", "#ffdcaa"),
     "eye": ("#161200", "#d8b000", "#fffbe0"), "blood": ("#120004", "#a0102a", "#ff8a98"),
+    # ground materials for roads and towns
+    "dirt": ("#120b06", "#6e5236", "#d6b68c"), "cobble": ("#0c0b0c", "#66625e", "#d2ccc2"),
+    "clay": ("#140604", "#7e3a24", "#dc9a78"), "wood": ("#0e0804", "#5e4226", "#c49a68"),
 }
 FAMS = list(FAM_DEF)
 NS = 8                                   # shades per family
@@ -741,22 +744,138 @@ def _up(a, m, cs):
     return rows[:, i0] * (1 - t)[None, :] + rows[:, i0 + 1] * t[None, :]
 
 
-def flow_bands(p, B, m, cs, seed):
-    """B = cell codes of the zone plus an m-cell margin from the zones round it"""
+def _clumpy(shape, rng, scale):
+    """soft blotchy noise (0..1) with blobs about `scale` pixels across"""
+    h, w = shape
+    lo = rng.random((h // scale + 2, w // scale + 2))
+    ys, xs = np.arange(h) / scale, np.arange(w) / scale
+    y0, x0 = ys.astype(int), xs.astype(int)
+    ty, tx = (ys - y0)[:, None], (xs - x0)[None, :]
+    return (lo[y0][:, x0] * (1 - ty) * (1 - tx) + lo[y0 + 1][:, x0] * ty * (1 - tx) +
+            lo[y0][:, x0 + 1] * (1 - ty) * tx + lo[y0 + 1][:, x0 + 1] * ty * tx)
+
+
+def _h(a, b, seed):
+    """hash of integer arrays -> 0..1"""
+    h = (a.astype(np.int64) * 374761393 + b.astype(np.int64) * 668265263 + seed * 982451653) & 0xFFFFFFFF
+    h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((h ^ (h >> 16)) & 0xFFFF) / 65535.0
+
+
+def _cobbles(p, mask, ox, oy, seed, size=7):
+    """irregular cobblestones: jittered Voronoi stones, lit from the top left, dark joints, a few missing"""
+    ys, xs = np.nonzero(mask)
+    if not len(ys):
+        return
+    Y, X = ys + oy, xs + ox                              # world pixel coords so stones line up across zones
+    gy, gx = Y // size, X // size
+    d1 = np.full(len(ys), 1e9); d2 = np.full(len(ys), 1e9)
+    sid = np.zeros(len(ys), np.int64); cyy = np.zeros(len(ys)); cxx = np.zeros(len(ys))
+    for oy_ in (-1, 0, 1):
+        for ox_ in (-1, 0, 1):
+            cy_, cx_ = gy + oy_, gx + ox_
+            py = cy_ * size + _h(cy_, cx_, seed) * size
+            px = cx_ * size + _h(cy_, cx_, seed + 1) * size
+            d = (Y - py) ** 2 + ((X - px) * 0.85) ** 2
+            closer = d < d1
+            d2 = np.where(closer, d1, np.minimum(d2, d))
+            d1 = np.where(closer, d, d1)
+            sid = np.where(closer, cy_ * 100003 + cx_, sid)
+            cyy = np.where(closer, py, cyy); cxx = np.where(closer, px, cxx)
+    joint = np.sqrt(d2) - np.sqrt(d1) < 1.4
+    tone = _h(sid, sid // 7, seed + 2)
+    light = ((Y - cyy) + (X - cxx)) < -1.5               # top-left of each stone catches the light
+    dark = ((Y - cyy) + (X - cxx)) > 2.0
+    shade = 2 + (tone * 2.99).astype(int) + light.astype(int) - dark.astype(int)
+    out = np.array([F("cobble", int(k)) for k in range(NS)])[np.clip(shade, 1, 6)]
+    missing = _h(sid, sid // 3, seed + 3) < 0.07
+    out = np.where(missing, F("dirt", 2), out)
+    out = np.where(joint, np.where(missing, F("dirt", 1), F("cobble", 0)), out)
+    p.img[ys, xs] = out
+
+
+def _bricks(p, mask, ox, oy, seed, bw=10, bh=5):
+    """staggered brick paving with a different colour per brick"""
+    ys, xs = np.nonzero(mask)
+    if not len(ys):
+        return
+    Y, X = ys + oy, xs + ox
+    row = Y // bh
+    Xs = X + (row % 2) * (bw // 2)
+    col = Xs // bw
+    joint = (Y % bh == 0) | (Xs % bw == 0)
+    tone = _h(row, col, seed)
+    out = np.array([F("clay", k) for k in range(NS)])[2 + (tone * 2.99).astype(int)]
+    out = np.where((Y % bh == 1) & ~joint, np.array([F("clay", k) for k in range(NS)])[3 + (tone * 2.99).astype(int)], out)
+    out = np.where(joint, F("clay", 0), out)
+    p.img[ys, xs] = out
+
+
+def flow_bands(p, B, m, cs, seed, ox=0, oy=0):
+    """roads, squares, lanes, paths and bridges as believable ground. B = cell codes of the zone plus an
+    m-cell margin from the zones round it; ox, oy = the zone's top-left in world pixels."""
     rng = np.random.default_rng(seed)
-    g = rng.random(p.img.shape)
-    water = np.repeat(np.repeat(np.isin(B[m:m + cs, m:m + cs], list(WATER) + ["bridge"]), TS, 0), TS, 1)
-    tr = _up(_blur((B == "trail").astype(float)), m, cs)
-    band = tr > 0.24
-    p.img[band] = np.where(g[band] < 0.3, F("brick", 0), F("brick", 1))
+    H, W = p.img.shape
+    g = rng.random((H, W))
+    big = _clumpy((H, W), rng, 26)
+    small = _clumpy((H, W), rng, 6)
+    cellwater = np.isin(B[m:m + cs, m:m + cs], list(WATER) + ["bridge"])
+    water = np.repeat(np.repeat(cellwater, TS, 0), TS, 1)
+    ragged = (small - 0.5) * 0.11 + (g - 0.5) * 0.035   # broken edges, never a clean line
     rd = _up(_blur(np.isin(B, ROADLIKE).astype(float)), m, cs)
-    band, rim = rd > 0.27, (rd > 0.2) & (rd <= 0.27)
-    land = band & ~water
-    p.img[land] = np.where(g[land] < 0.22, F("brick", 1), np.where(g[land] > 0.93, F("brick", 3), F("brick", 2)))
-    p.img[rim & ~water] = F("brick", 0)
-    planks = band & water                                    # a road over water is a bridge: planks
-    yy = np.nonzero(planks)[0]
-    p.img[planks] = np.where((yy // 4) % 2 == 0, F("brick", 3), F("brick", 2))
+    band = (rd + ragged > 0.26)
+    town = _up(_blur(_blur(np.isin(B, ["plaza", "house", "bonfire"]).astype(float))), m, cs) > 0.05
+    square = _up(_blur(np.isin(B, ["plaza", "bonfire"]).astype(float)), m, cs) + ragged > 0.3
+    dirtshades = np.array([F("dirt", k) for k in range(NS)])
+
+    # dust spilling onto the ground beside roads and paths
+    tr = _up(_blur((B == "trail").astype(float)), m, cs)
+    spill = (((rd + ragged > 0.19) & ~band) | ((tr + ragged > 0.17) & (tr + ragged <= 0.24))) & ~water & (g < 0.45)
+    p.img[spill] = dirtshades[np.where(g[spill] < 0.15, 1, 2)]
+
+    # dirt roads: blotchy dust in several tones, wheel ruts, pebbles, puddles
+    dirt = band & ~water & ~town
+    v = big * 0.55 + small * 0.3 + g * 0.3
+    p.img[dirt] = dirtshades[np.clip((v[dirt] * 4.2).astype(int), 1, 5)]
+    rut = dirt & (np.abs(rd - 0.335) < 0.011) & (g > 0.12)
+    p.img[rut] = dirtshades[np.where(g[rut] > 0.6, 0, 1)]
+    pud = dirt & (big > 0.74) & (small > 0.52)
+    p.img[pud] = F("sea", 2)
+    rim = pud & ~np.roll(pud, 1, 0)
+    p.img[rim] = F("sea", 5)
+
+    # footpaths: narrow, scruffy
+    path = (tr + ragged > 0.24) & ~band & ~water
+    p.img[path] = dirtshades[np.clip((v[path] * 3.4).astype(int), 1, 3)]
+
+    # town: cobbled squares, brick lanes, both a bit broken
+    _cobbles(p, band & square & ~water, ox, oy, seed)
+    lane = band & town & ~square & ~water
+    _bricks(p, lane, ox, oy, seed)
+    broken = lane & (small > 0.72) & (big > 0.5)
+    p.img[broken] = dirtshades[np.clip((v[broken] * 4).astype(int), 1, 4)]
+
+    # pebbles scattered on dirt and paths, each with a pixel of shadow
+    for msk, dens in ((dirt, 0.004), (path, 0.003), (broken, 0.006)):
+        ys, xs = np.nonzero(msk)
+        if len(ys):
+            k = rng.choice(len(ys), int(len(ys) * dens) + 1)
+            for dy, dx, col in ((1, 1, F("dirt", 0)), (0, 0, F("cobble", 5)), (0, 1, F("cobble", 4)), (1, 0, F("cobble", 4))):
+                yy, xx = np.clip(ys[k] + dy, 0, H - 1), np.clip(xs[k] + dx, 0, W - 1)
+                p.img[yy, xx] = col
+
+    # bridges: boards with gaps and knots
+    planks = band & water
+    ys, xs = np.nonzero(planks)
+    if len(ys):
+        Y = ys + oy
+        board = Y // 5
+        tone = _h(board, board // 3, seed)
+        out = np.array([F("wood", k) for k in range(NS)])[3 + (tone * 2.5).astype(int)]
+        out = np.where(Y % 5 == 0, F("wood", 0), out)
+        knot = _h(Y // 2, (xs + ox) // 3, seed + 5) < 0.02
+        out = np.where(knot, F("wood", 1), out)
+        p.img[ys, xs] = out
 
 
 def to_rgb(img8, t=0.0):
