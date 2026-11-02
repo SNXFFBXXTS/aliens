@@ -44,7 +44,8 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "bridge": "Bridge", "house": "House", "plaza": "Town"}
 BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too deep to swim.",
            "mountain": "The rock face is too steep.", "peak": "The peak is too steep to climb.",
-           "house": "Someone lives there.", "lava": "Lava! Far too hot to step in."}
+           "house": "Someone lives there.", "lava": "Lava! Far too hot to step in.",
+           "river": "The current's too strong to wade. Find a bridge.", "lake": "The lake's too deep to wade."}
 
 
 class World:
@@ -292,7 +293,7 @@ class Game:
         self.px, self.py = nx, ny
         if c != self.here:
             nm = NAMES.get(c, c)
-            if c in ("shallow", "lake", "river"):
+            if c == "shallow":
                 self.say("You wade through the " + nm.lower() + ".")
             elif c not in ("road", "bridge", "plaza") or self.here not in ("road", "bridge", "plaza"):
                 d = im.describe(c) if self.turn - self.last_desc.get(c, -9999) > 150 else None
@@ -360,7 +361,6 @@ class Game:
             self.say(f"The {m.name} turns on you!")
         if random.random() > hit:
             self.say(f"You miss the {m.name}.")
-            self.amb.fx("miss")
             return
         d = max(1, random.randint(2, 5) + self.lvl - 1 - m.sp.defn)
         m.hp -= d
@@ -419,6 +419,17 @@ class Game:
             self.hp += 1
         self.update_view()
 
+    def zone_mood(self):
+        """the zone's main ground type picks the ambience, so it doesn't flicker as you step between trees and paths"""
+        k = (self.px // CS, self.py // CS)
+        if getattr(self, "_mood", (None,))[0] != k:
+            b = self.w.chunk(*k)
+            vals, counts = np.unique(b, return_counts=True)
+            order = [str(v) for _, v in sorted(zip(counts, vals), reverse=True)]
+            mood = "plaza" if "plaza" in order else next((v for v in order if v not in ("road", "house", "bridge")), order[0])
+            self._mood = (k, mood)
+        return self._mood[1]
+
     def update_view(self):
         """what you can see from here, at this time of day"""
         day, phase, r, tint = im.daytime(self.turn)
@@ -427,7 +438,7 @@ class Game:
         self.vis = im.fov(self.px, self.py, r, self.w.cell)
         self.w.remember(self.vis)
         self.dark = None
-        self.amb.area(self.here, phase == "Night")
+        self.amb.area(self.zone_mood(), phase == "Night")
         if phase != getattr(self, "phase", phase):
             self.say({"Dawn": "The sky pales. Dawn.", "Day": "Full daylight.", "Dusk": "The light goes amber, then violet. Dusk.",
                       "Night": "Night falls. You can barely see past your hands."}[phase])

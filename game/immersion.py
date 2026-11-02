@@ -109,7 +109,7 @@ D = {
     "plaza": (["Domed huts crowd round a dusty square.", "Lanterns glow in round windows."], ["Murmured voices, a door creaking.", "Someone is hammering something."],
               ["Woodsmoke and cooking.", "Bread, smoke and animals."]),
 }
-WATERY = {"shallow": "You wade into cold water.", "lake": "You wade into the lake; things brush your legs.", "river": "The river tugs at your knees."}
+WATERY = {"shallow": "You wade into cold, knee-deep water."}
 
 
 def describe(biome, rng=random):
@@ -162,80 +162,68 @@ def _loopfade(x, f=2000):
     return x
 
 
+SOUND_VERSION = "2-minimal"
+
+
 def make_sounds():
+    """soft, minimal beds: no chirps, pops or knocks; just air, water, heat and hum"""
     rng = np.random.default_rng(7)
-    n = RATE * 8
+    n = RATE * 12
     t = np.arange(n) / RATE
-    wind = _lp(_noise(n, rng), 0.02) * (0.6 + 0.4 * np.sin(2 * np.pi * t / 8 * 2) ** 2)
-    _write("amb_wind", _loopfade(wind))
-    cold = _lp(_noise(n, rng), 0.05) * (0.5 + 0.5 * np.sin(2 * np.pi * t / 4) ** 2) + 0.15 * np.sin(2 * np.pi * 880 * t) * (np.sin(2 * np.pi * t / 8) > 0.95)
-    _write("amb_cold", _loopfade(cold))
-    forest = _lp(_noise(n, rng), 0.03) * 0.7
-    for _ in range(14):                               # odd little chirps
-        s = rng.integers(0, n - 4000); f0 = rng.uniform(1800, 3600)
-        k = np.arange(3000)
-        forest[s:s + 3000] += 0.35 * np.sin(2 * np.pi * (f0 + 900 * np.sin(k / 300)) * k / RATE) * np.exp(-k / 700)
-    _write("amb_forest", _loopfade(forest))
-    jungle = _lp(_noise(n, rng), 0.05) * 0.5
-    for _ in range(40):                               # wet clicks and pops
-        s = rng.integers(0, n - 800); k = np.arange(800)
-        jungle[s:s + 800] += 0.5 * np.sin(2 * np.pi * rng.uniform(300, 1400) * k / RATE) * np.exp(-k / 120)
-    _write("amb_jungle", _loopfade(jungle))
-    water = _lp(_noise(n, rng), 0.12) * (0.5 + 0.5 * np.abs(np.sin(2 * np.pi * t * 0.5)))
-    for _ in range(60):                               # bubbles
-        s = rng.integers(0, n - 1200); k = np.arange(1200); f0 = rng.uniform(400, 900)
-        water[s:s + 1200] += 0.25 * np.sin(2 * np.pi * (f0 + k * 0.4) * k / RATE) * np.exp(-k / 250)
-    _write("amb_water", _loopfade(water))
-    lava = _lp(_noise(n, rng), 0.004) * 3 + 0.4 * np.sin(2 * np.pi * 38 * t) * (0.6 + 0.4 * np.sin(2 * np.pi * t / 4))
-    for _ in range(50):                               # crackles
-        s = rng.integers(0, n - 200)
-        lava[s:s + 200] += _noise(200, rng) * np.exp(-np.arange(200) / 40)
-    _write("amb_lava", _loopfade(lava))
-    drone = sum(np.sin(2 * np.pi * f * t + p) for f, p in ((55, 0), (55.7, 1), (82.4, 2), (110.9, 3)))
-    drone *= 0.6 + 0.4 * np.sin(2 * np.pi * t / 8)
-    drone += _lp(_noise(n, rng), 0.01) * 2
-    _write("amb_fungal", _loopfade(drone))
-    chime = _lp(_noise(n, rng), 0.01) * 0.3
-    for _ in range(12):
-        s = rng.integers(0, n - 20000); k = np.arange(20000); f0 = rng.choice([1046, 1318, 1568, 2093, 2637])
-        chime[s:s + 20000] += 0.4 * np.sin(2 * np.pi * f0 * k / RATE) * np.exp(-k / 6000)
+    swell = lambda per, depth: (1 - depth) + depth * np.sin(2 * np.pi * t / per) ** 2
+    _write("amb_wind", _loopfade(_lp(_noise(n, rng), 0.012) * swell(12, 0.5)))
+    _write("amb_cold", _loopfade(_lp(_noise(n, rng), 0.03) * swell(6, 0.6)))
+    _write("amb_forest", _loopfade(_lp(_noise(n, rng), 0.02) * swell(12, 0.3)))
+    _write("amb_jungle", _loopfade(_lp(_noise(n, rng), 0.035) * swell(4, 0.25)))
+    _write("amb_water", _loopfade(_lp(_noise(n, rng), 0.06) * (0.6 + 0.4 * np.abs(np.sin(2 * np.pi * t / 3)))))
+    _write("amb_lava", _loopfade(_lp(_noise(n, rng), 0.004) * 2 + 0.25 * np.sin(2 * np.pi * 40 * t) * swell(6, 0.5)))
+    drone = sum(np.sin(2 * np.pi * f * t + p) for f, p in ((55, 0), (55.5, 1), (82.4, 2)))
+    _write("amb_fungal", _loopfade(drone * swell(12, 0.5) + _lp(_noise(n, rng), 0.01) * 1.5))
+    chime = _lp(_noise(n, rng), 0.008) * 0.6
+    for s0, f0 in ((RATE * 2, 1318), (RATE * 7, 1046)):             # two soft, far-off notes
+        k = np.arange(RATE * 4)
+        chime[s0:s0 + len(k)] += 0.12 * np.sin(2 * np.pi * f0 * k / RATE) * np.exp(-k / (RATE * 1.2))
     _write("amb_crystal", _loopfade(chime))
-    town = _lp(_noise(n, rng), 0.015) * 1.2
-    for _ in range(10):                               # distant knocks
-        s = rng.integers(0, n - 1500); k = np.arange(1500)
-        town[s:s + 1500] += 0.5 * np.sin(2 * np.pi * 180 * k / RATE) * np.exp(-k / 200)
-    _write("amb_town", _loopfade(town))
-    night = _lp(_noise(n, rng), 0.01) * 0.5
-    for s in range(0, n - 3000, RATE // 3):           # crickets
-        if rng.random() < 0.6:
-            k = np.arange(2000)
-            night[s:s + 2000] += 0.3 * np.sin(2 * np.pi * 4200 * k / RATE) * (np.sin(2 * np.pi * 30 * k / RATE) > 0) * np.exp(-k / 900)
+    _write("amb_town", _loopfade(_lp(_noise(n, rng), 0.01) * swell(12, 0.3)))
+    night = _lp(_noise(n, rng), 0.006)
+    for s0 in range(0, n - 3000, RATE):                            # very sparse, soft crickets
+        if rng.random() < 0.25:
+            k = np.arange(1500)
+            night[s0:s0 + 1500] += 0.08 * np.sin(2 * np.pi * 4200 * k / RATE) * (np.sin(2 * np.pi * 30 * k / RATE) > 0) * np.exp(-k / 600)
     _write("amb_night", _loopfade(night))
-    # effects
-    k = np.arange(int(RATE * 0.12))
-    _write("fx_hit", _noise(len(k), rng) * np.exp(-k / 400) + np.sin(2 * np.pi * 120 * k / RATE) * np.exp(-k / 600))
-    _write("fx_hurt", np.sin(2 * np.pi * (220 - k * 0.03) * k / RATE) * np.exp(-k / 800) + 0.3 * _noise(len(k), rng) * np.exp(-k / 300))
-    k = np.arange(int(RATE * 0.5))
-    _write("fx_kill", np.sin(2 * np.pi * 660 * k / RATE) * np.exp(-k / 3000) + 0.6 * np.sin(2 * np.pi * 990 * k / RATE) * np.exp(-k / 2500))
-    k = np.arange(int(RATE * 0.9))
-    lvl = sum(np.sin(2 * np.pi * f * k / RATE) * (k > i * 3000) * np.exp(-np.maximum(0, k - i * 3000) / 5000)
-              for i, f in enumerate((523, 659, 784, 1046)))
-    _write("fx_level", lvl)
-    k = np.arange(int(RATE * 0.06))
-    _write("fx_miss", _lp(_noise(len(k), rng), 0.3) * np.exp(-k / 300))
+    k = np.arange(int(RATE * 0.1))
+    _write("fx_hit", np.sin(2 * np.pi * 110 * k / RATE) * np.exp(-k / 350))
+    _write("fx_hurt", np.sin(2 * np.pi * (160 - k * 0.02) * k / RATE) * np.exp(-k / 500))
+    k = np.arange(int(RATE * 0.6))
+    _write("fx_kill", np.sin(2 * np.pi * 440 * k / RATE) * np.exp(-k / 2500))
+    k = np.arange(int(RATE * 1.2))
+    _write("fx_level", sum(np.sin(2 * np.pi * f * k / RATE) * (k > i * 4000) * np.exp(-np.maximum(0, k - i * 4000) / 6000)
+                           for i, f in enumerate((523, 659, 784))))
+    with open(os.path.join(SND_DIR, "version"), "w") as fh:
+        fh.write(SOUND_VERSION)
+
+
+# how loud each bed is, relative to the master volume
+BED_GAIN = {"amb_wind": 0.8, "amb_cold": 0.7, "amb_forest": 0.6, "amb_jungle": 0.6, "amb_water": 0.7, "amb_lava": 0.8,
+            "amb_fungal": 0.7, "amb_crystal": 0.7, "amb_town": 0.5}
 
 
 class Ambience:
-    """quiet ambient loops that crossfade as you move between areas; N toggles"""
+    """quiet ambient beds that change slowly with the zone you're in (not every step); N toggles"""
 
-    def __init__(self, volume=0.22):
+    def __init__(self, volume=0.07):
         self.ok = False
         self.on = True
         self.vol = volume
         try:
             import pygame
             self.pg = pygame
-            if not os.path.exists(os.path.join(SND_DIR, "amb_night.wav")):
+            ver = ""
+            try:
+                ver = open(os.path.join(SND_DIR, "version")).read()
+            except OSError:
+                pass
+            if ver != SOUND_VERSION:
                 make_sounds()
             pygame.mixer.init(RATE, -16, 1, 1024)
             pygame.mixer.set_num_channels(8)
@@ -254,23 +242,23 @@ class Ambience:
         name = "amb_" + AMB_OF.get(biome, "wind")
         if name != self.cur:
             self.cur = name
-            self.ch[0].fadeout(1500)
+            self.ch[0].fadeout(4000)
             self.ch.reverse()
             if self.on:
-                self.ch[0].set_volume(self.vol)
-                self.ch[0].play(self.snd[name], loops=-1, fade_ms=1500)
+                self.ch[0].set_volume(self.vol * BED_GAIN.get(name, 0.7))
+                self.ch[0].play(self.snd[name], loops=-1, fade_ms=4000)
         want = night and self.on
         if want and not self.night_ch.get_busy():
-            self.night_ch.set_volume(self.vol * 0.6)
-            self.night_ch.play(self.snd["amb_night"], loops=-1, fade_ms=3000)
+            self.night_ch.set_volume(self.vol * 0.5)
+            self.night_ch.play(self.snd["amb_night"], loops=-1, fade_ms=6000)
         elif not want and self.night_ch.get_busy():
-            self.night_ch.fadeout(3000)
+            self.night_ch.fadeout(6000)
 
     def fx(self, name, vol=1.0):
         if self.ok and self.on:
             s = self.snd.get("fx_" + name)
             if s:
-                s.set_volume(self.vol * 1.6 * vol)
+                s.set_volume(self.vol * 1.2 * vol)
                 s.play()
 
     def toggle(self):
