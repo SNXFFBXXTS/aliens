@@ -579,7 +579,14 @@ class Game:
             self.last_step = now
             self.act(*d)
 
+    def set_zoom(self, d):
+        self.zoom = max(0, min(len(self.ZOOMS) - 1, getattr(self, "zoom", 2) + d))
+        self.dark = None
+        self.say(f"Zoom {int(self.ZOOMS[self.zoom] * 100)}%")
+
     def handle(self, e):
+        if e.type == pygame.MOUSEWHEEL and not self.show_map:
+            self.set_zoom(1 if e.y > 0 else -1)
         if e.type == pygame.KEYUP and getattr(self, "hold", None) and e.key == self.hold[0]:
             self.hold = None
         if e.type == pygame.KEYDOWN:
@@ -602,6 +609,8 @@ class Game:
             elif k in moves:
                 self.act(*moves[k])                 # first press: turn (or step if already facing that way)
                 self.hold = (k, moves[k], time.monotonic())
+            elif k in (pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_MINUS, pygame.K_MINUS):
+                self.set_zoom(+1 if k in (pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_PLUS) else -1)
             elif k == pygame.K_n:
                 self.say("Sound on." if self.amb.toggle() else "Sound off.")
             elif k == pygame.K_m:
@@ -623,46 +632,60 @@ class Game:
         self.screen.blit(img, img.get_rect(center=self.screen.get_rect().center))
         pygame.display.flip()
 
+    ZOOMS = (0.5, 0.75, 1.0, 1.5, 2.0)
+
     def draw_world(self):
-        sw, sh = self.screen.get_size()
-        vh = sh - HUD_H - LOG_H
+        """draw the view; zoomed views are drawn at their own size, then scaled to fit"""
+        SW, SH = self.screen.get_size()
+        VH = SH - HUD_H - LOG_H
+        z = self.ZOOMS[getattr(self, "zoom", 2)]
+        if z == 1.0:
+            S, top, sw, vh = self.screen, HUD_H, SW, VH
+        else:
+            sw, vh = int(SW / z), int(VH / z)
+            if getattr(self, "_view", None) is None or self._view.get_size() != (sw, vh):
+                self._view = pygame.Surface((sw, vh)).convert()
+            S, top = self._view, 0
         now = time.monotonic()
         t = now - self.t0
         cxp = self.px * PX + PX // 2 - sw // 2            # camera: player in the middle
         cyp = self.py * PX + PX // 2 - vh // 2
-        self.screen.fill((0, 0, 0))
+        S.fill((0, 0, 0))
         c0x, c0y = cxp // (CS * PX), cyp // (CS * PX)
         c1x, c1y = (cxp + sw) // (CS * PX), (cyp + vh) // (CS * PX)
-        self.screen.set_clip(pygame.Rect(0, HUD_H, sw, vh))
+        S.set_clip(pygame.Rect(0, top, sw, vh))
         pal = [tuple(c) for c in weird.palette(t)]          # the trippy bit: colours cycle every frame
         for cy in range(c0y, c1y + 1):
             for cx in range(c0x, c1x + 1):
                 srf = self.w.surface(cx, cy)
                 srf.set_palette(pal)
-                self.screen.blit(srf, (cx * CS * PX - cxp, cy * CS * PX - cyp + HUD_H))
-        fires = self.draw_live(t, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
+                S.blit(srf, (cx * CS * PX - cxp, cy * CS * PX - cyp + top))
+        fires = self.draw_live(S, top, t, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
         for m in self.w.mobs.values():
-            x, y = m.x * PX - cxp, m.y * PX - cyp + HUD_H
-            if (m.x, m.y) in self.vis and -PX < x < sw and HUD_H - PX < y < HUD_H + vh:
-                self.screen.blit(self.foot_shadow(), (x + 4, y + PX - 9))
+            x, y = m.x * PX - cxp, m.y * PX - cyp + top
+            if (m.x, m.y) in self.vis and -PX < x < sw and top - PX < y < top + vh:
+                S.blit(self.foot_shadow(), (x + 4, y + PX - 9))
                 spr = self.mob_sprite(m)
                 if now - self.flash.get(m.id, 0) < 0.15:
                     spr = spr.copy(); spr.fill((255, 255, 255), special_flags=pygame.BLEND_RGB_MAX)
-                self.screen.blit(spr, (x, y))
+                S.blit(spr, (x, y))
                 if m.hp < m.maxhp:
-                    pygame.draw.rect(self.screen, (60, 0, 0), (x + 3, y - 3, PX - 6, 3))
-                    pygame.draw.rect(self.screen, (230, 50, 50), (x + 3, y - 3, int((PX - 6) * m.hp / m.maxhp), 3))
-        self.screen.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), HUD_H - (cyp % PX)))
+                    pygame.draw.rect(S, (60, 0, 0), (x + 3, y - 3, PX - 6, 3))
+                    pygame.draw.rect(S, (230, 50, 50), (x + 3, y - 3, int((PX - 6) * m.hp / m.maxhp), 3))
+        S.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), top - (cyp % PX)))
         glow = self.glow_frames()
         for (fx, fy) in fires:                           # firelight pushes back the dark
             g = glow[int(t * 7 + fx) % len(glow)]
-            self.screen.blit(g, (fx - g.get_width() // 2, fy - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
-        hx, hy = self.px * PX - cxp, self.py * PX - cyp + HUD_H
-        self.screen.blit(self.foot_shadow(), (hx + 4, hy + PX - 9))
-        self.screen.blit(self.hero, (hx, hy))
-        self.screen.set_clip(None)
+            S.blit(g, (fx - g.get_width() // 2, fy - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
+        hx, hy = self.px * PX - cxp, self.py * PX - cyp + top
+        S.blit(self.foot_shadow(), (hx + 4, hy + PX - 9))
+        S.blit(self.hero, (hx, hy))
+        S.set_clip(None)
+        if S is not self.screen:
+            scale = pygame.transform.scale if z > 1 else pygame.transform.smoothscale
+            self.screen.blit(scale(S, (SW, VH)), (0, HUD_H))
         if now - self.flash.get("you", 0) < 0.2:           # red flash when you're hurt
-            ov = pygame.Surface((sw, vh), pygame.SRCALPHA)
+            ov = pygame.Surface((SW, VH), pygame.SRCALPHA)
             ov.fill((200, 0, 0, 60))
             self.screen.blit(ov, (0, HUD_H))
 
@@ -693,29 +716,29 @@ class Game:
             self._glow = out
         return self._glow
 
-    def draw_live(self, t, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y):
+    def draw_live(self, S, top, t, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y):
         """grass and trees swaying (a gust rolls across the land), fires flickering; returns firelight spots"""
         if not hasattr(self, "live_cache"):
             self.live_cache = {}
             self.fire_surfs = [self.crunch(pygame.image.frombuffer(a.tobytes(), (a.shape[1], a.shape[0]), "RGBA"))
                                for a in weird.fire_frames(11)]
         fires = []
-        top, bottom = HUD_H - 90, HUD_H + vh + 10
+        ylo, yhi = top - 90, top + vh + 10
         for cy in range(c0y - 1, c1y + 2):
             for cx in range(c0x - 1, c1x + 2):
                 for (kind, wx, wy, key) in self.w.feats.get((cx, cy), ()):
-                    sx, sy = wx - cxp, wy - cyp + HUD_H
-                    if sx < -90 or sx > sw + 10 or sy < top or sy > bottom:
+                    sx, sy = wx - cxp, wy - cyp + top
+                    if sx < -90 or sx > sw + 10 or sy < ylo or sy > yhi:
                         continue
                     if kind == "fire":
-                        self.screen.blit(self.fire_surfs[int(t * 9 + (wx * 7 + wy * 3) % 6) % 6], (sx, sy))
+                        S.blit(self.fire_surfs[int(t * 9 + (wx * 7 + wy * 3) % 6) % 6], (sx, sy))
                         if (wx // PX, wy // PX) in self.vis:
                             fires.append((sx + PX // 2, sy + PX * 3 // 4))
                         continue
                     surfs, pad = self.live_frames(key)
                     phase = t * 1.6 - (wx * 0.0045 + wy * 0.0018)        # the wave travels across the land
                     f = int((phase / 6.2832) % 1 * len(surfs))
-                    self.screen.blit(surfs[f], (sx - pad, sy - pad))
+                    S.blit(surfs[f], (sx - pad, sy - pad))
         return fires
 
     def foot_shadow(self):
@@ -793,7 +816,7 @@ class Game:
         for n, msg in enumerate(self.msgs):
             col = (225, 225, 225) if n == len(self.msgs) - 1 else (125, 125, 135)
             self.screen.blit(self.font.render(msg, True, col), (10, sh - LOG_H + 2 + n * 19))
-        keys = self.small.render("Move/attack: arrows WASD numpad   . wait   M map   N sound   Esc save & quit", True, (100, 100, 110))
+        keys = self.small.render("Move: arrows WASD numpad   . wait   numpad +/- zoom   M map   N sound   Esc save & quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
 
     def draw_death(self):

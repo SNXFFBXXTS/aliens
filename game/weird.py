@@ -868,14 +868,6 @@ def flow_bands(p, B, m, cs, seed, ox=0, oy=0):
     # bridges: boards with gaps and knots
     planks = band & water
     _bridge(p, planks, ox, oy, seed)
-    # the chunky, slightly broken pixel look -- only on the made ground (roads, paths, squares, bridges, dust)
-    made = band | path | spill
-    ys, xs = np.nonzero(made)
-    if len(ys):
-        q = PIX
-        sy = np.clip(((ys + oy) // q) * q - oy, 0, H - 1)
-        sx = np.clip(((xs + ox) // q) * q - ox, 0, W - 1)
-        p.img[ys, xs] = p.img[sy, sx]
 
 
 def _bridge(p, planks, ox, oy, seed):
