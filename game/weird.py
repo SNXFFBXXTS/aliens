@@ -589,8 +589,13 @@ def ground(p, x, y, fam, r):
 BUILT = {"wall", "wwall", "ruin", "floor", "wfloor", "packed", "scorch", "railh", "railv"}
 
 
-def built(p, x, y, b, r):
-    """man-made ground: walls (lit top face, shaded foot), floors, rails, burnt earth"""
+WALLS = ("wall", "wwall", "ruin")
+
+
+def built(p, x, y, b, r, nb=(False, False, False, False)):
+    """man-made ground: walls, floors, rails, burnt earth. nb = is there wall (up, down, left, right):
+    walls join up with their neighbours, so the lit top face and shaded foot only show at the ends"""
+    up, down, left, right = nb
     c = p.cell(x, y)
     g = np.random.default_rng(int(r[0] * 1e9) & 0xFFFFFFFF).random((TS, TS))
     yy, xx = np.mgrid[0:TS, 0:TS]
@@ -598,8 +603,14 @@ def built(p, x, y, b, r):
     if b in ("wall", "ruin"):
         c[:] = F("cobble", 3)
         c[(yy % 8 == 0) | (((xx + (yy // 8) * 6) % 12) == 0)] = F("cobble", 2)       # block courses
-        c[:6] = F("cobble", 5); c[:6][g[:6] < 0.2] = F("cobble", 4)                 # top face catches the light
-        c[-4:] = F("cobble", 1)                                                     # foot in shadow
+        if not up:
+            c[:6] = F("cobble", 5); c[:6][g[:6] < 0.2] = F("cobble", 4)             # top face catches the light
+        if not down:
+            c[-4:] = F("cobble", 1)                                                 # foot in shadow
+        if not left:
+            c[:, :2] = F("cobble", 4)                                               # lit left edge
+        if not right:
+            c[:, -2:] = F("cobble", 1)                                              # shaded right edge
         c[g < 0.06] = F("cobble", 2)
         if b == "ruin":                                                             # broken: chunks gone, rubble
             hole = (_clumpy((TS, TS), np.random.default_rng(gx * 31 + gy), 9) > 0.55)
@@ -607,7 +618,14 @@ def built(p, x, y, b, r):
     elif b == "wwall":
         c[:] = np.where((xx // 5) % 2 == 0, F("wood", 3), F("wood", 4))
         c[xx % 5 == 0] = F("wood", 1)
-        c[:5] = F("wood", 5); c[-4:] = F("wood", 1)
+        if not up:
+            c[:5] = F("wood", 5)
+        if not down:
+            c[-4:] = F("wood", 1)
+        if not left:
+            c[:, :2] = F("wood", 4)
+        if not right:
+            c[:, -2:] = F("wood", 1)
         c[g < 0.04] = F("wood", 2)
     elif b == "floor":
         c[:] = np.where(g < 0.25, F("cobble", 1), F("cobble", 2))

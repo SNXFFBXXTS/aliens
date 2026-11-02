@@ -196,6 +196,10 @@ class World:
                     weird.paint(p, self.species, x, y, under, R[y, x], mode="ground")
                     if c in ("house", "bonfire") or c.startswith("p_"):
                         weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing")
+                elif c in weird.WALLS:             # walls join up with the walls next to them
+                    W_ = weird.WALLS
+                    weird.built(p, x, y, c, R[y, x], nb=(B[y + M - 1, x + M] in W_, B[y + M + 1, x + M] in W_,
+                                                          B[y + M, x + M - 1] in W_, B[y + M, x + M + 1] in W_))
                 else:
                     weird.paint(p, self.species, x, y, c, R[y, x], defer=items)
         roads, trails = self.lines(cx, cy)
