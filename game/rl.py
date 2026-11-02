@@ -397,8 +397,9 @@ class Game:
             return None
 
     def char_look(self):
+        """in the world you're just your symbol: no gear symbols round it (they stay in the menu)"""
         c = self.char
-        return tuple(c["look"]) + (tuple(c["coat"]), tuple(c["trim"]))
+        return (None, None, None, None, tuple(c["coat"]), tuple(c["trim"]))
 
     def hero_surface(self, left):
         """you, as your symbol with its gear, facing the way you walk"""
@@ -407,7 +408,7 @@ class Game:
             import charcreate
             s = pygame.Surface((PX * 3, PX * 3), pygame.SRCALPHA)
             charcreate.draw_char(s, PX * 3 // 2, PX * 3 // 2, int(PX * 1.1), self.char["body"], self.char_look(),
-                                 tuple(self.char["skin_rgb"]), self.char.get("mutation"))
+                                 tuple(self.char["skin_rgb"]), None)
             rim = pygame.mask.from_surface(s).to_surface(setcolor=(235, 230, 215, 120), unsetcolor=(0, 0, 0, 0))
             out = pygame.Surface(s.get_size(), pygame.SRCALPHA)
             for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):  # a faint light outline so you stand out
@@ -927,7 +928,7 @@ class Game:
                 for k_ in ("dx", "wdx"):
                     pose[k_] = pose.get(k_, 0) * 0.35
                 charcreate.draw_char(tmp, d // 2, d // 2, int(PX * 1.1), self.char["body"], self.char_look(),
-                                     tuple(self.char["skin_rgb"]), self.char.get("mutation"), pose)
+                                     tuple(self.char["skin_rgb"]), None, pose)
                 if left:
                     tmp = pygame.transform.flip(tmp, True, False)
                 S.blit(tmp, (hx + PX // 2 - d // 2, hy + PX // 2 - d // 2 - 6))
