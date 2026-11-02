@@ -368,7 +368,7 @@ def wrap(font, text, w):
 
 
 def run(screen, root, shot=None, setup=None):
-    """the character creation screen. Returns when Esc is pressed (outside the builder)."""
+    """the character creation screen. Returns the character on Enter, None on Esc (outside the builder)."""
     pygame.display.set_caption("New drifter")
     big, mid, small, tiny = _font(UIB, 32), _font(UIB, 19), _font(UI, 15), _font(UI, 13)
     cjk = _font(CJK, 40)
@@ -494,7 +494,7 @@ def run(screen, root, shot=None, setup=None):
                 os.makedirs(root, exist_ok=True)
                 with open(os.path.join(root, "character.json"), "w") as f:
                     json.dump(d, f, indent=1, ensure_ascii=False)
-                msg, msg_t = f"{st['name']} is ready. (Preview: the game will start from here once it's built. Esc to quit.)", now
+                return d                                          # into the world
         if fight is None and now - last_input > 2.5 and int(now * 10) % 40 == 0:   # shows off when idle
             fight = (random.choice(MOVES[style]), now)
         sw, sh = screen.get_size()
@@ -656,7 +656,7 @@ def run(screen, root, shot=None, setup=None):
             y += ((len(a["kit"]) + 1) // 2) * 20 + 10
             screen.blit(mid.render("Moves", True, (230, 225, 210)), (rx, y)); y += 26
             screen.blit(small.render("  ·  ".join(MOVES[style]), True, look[5]), (rx, y))
-        keys = "Up/Down who you were   Left/Right body   C skin   N name   R random   F fight   Tab build   Enter keep   Esc quit"
+        keys = "Up/Down who you were   Left/Right body   C skin   N name   R random   F fight   Tab build   Enter begin   Esc quit"
         screen.blit(tiny.render(keys, True, (130, 130, 145)), (30, sh - 24))
         if msg and now - msg_t < 6:
             m = small.render(msg, True, (240, 220, 160))

@@ -339,8 +339,9 @@ class World:
 
 
 class Game:
-    def __init__(self, seed, screen, world=None):
+    def __init__(self, seed, screen, world=None, character=None):
         self.w = world or World(seed)
+        self.char = character or self.load_character()
         self.screen = screen
         self.font = self.load_font(15)
         self.big = self.load_font(22, True)
@@ -359,11 +360,14 @@ class Game:
         self.dead = False
         self.killer = ""
         self.lvl, self.xp, self.turn = 1, 0, 0
-        self.maxhp = 30
+        stt = (self.char or {}).get("stats", {})
+        self.stat = {k: stt.get(k, 5) for k in ("STR", "AGI", "TOU", "WIT", "CHA", "LCK")}
+        self.base_hp = 15 + self.stat["TOU"] * 3                 # toughness decides how much you can take
+        self.maxhp = self.base_hp
         st = self.load_state()
         if st:
             self.lvl, self.xp, self.turn = st.get("lvl", 1), st.get("xp", 0), st.get("turn", 0)
-            self.maxhp = 30 + (self.lvl - 1) * 6
+            self.maxhp = self.base_hp + (self.lvl - 1) * 6
             self.hp = st.get("hp", self.maxhp)
             self.w.dead = set(st.get("dead", []))
             self.px, self.py = st["px"], st["py"]
@@ -373,7 +377,8 @@ class Game:
         else:
             self.px, self.py = self.start_spot()
             self.hp = self.maxhp
-            self.say("You arrive in town. Press M for the world map: travel on it with the arrows, M again to zoom back in.")
+            who = f"{self.char['name']}, {self.char['archetype'].lower()}, " if self.char else "You "
+            self.say(who + "arrives in town. M opens the world map (travel with the arrows, M again to zoom in).")
         self.here = self.w.cell(self.px, self.py)
         self.update_view()
         for i in self.w.dead:
@@ -383,6 +388,33 @@ class Game:
     def load_font(self, sz, bold=False):
         f = "/usr/share/fonts/noto/NotoSans-%s.ttf" % ("Bold" if bold else "Regular")
         return pygame.font.Font(f if os.path.exists(f) else None, sz)
+
+    def load_character(self):
+        try:
+            with open(os.path.join(ROOT, "character.json")) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def char_look(self):
+        c = self.char
+        return tuple(c["look"]) + (tuple(c["coat"]), tuple(c["trim"]))
+
+    def hero_surface(self, left):
+        """you, as your symbol with its gear, facing the way you walk"""
+        key = ("hero", left)
+        if key not in self.mob_img:
+            import charcreate
+            s = pygame.Surface((PX * 3, PX * 3), pygame.SRCALPHA)
+            charcreate.draw_char(s, PX * 3 // 2, PX * 3 // 2, int(PX * 1.1), self.char["body"], self.char_look(),
+                                 tuple(self.char["skin_rgb"]), self.char.get("mutation"))
+            rim = pygame.mask.from_surface(s).to_surface(setcolor=(235, 230, 215, 120), unsetcolor=(0, 0, 0, 0))
+            out = pygame.Surface(s.get_size(), pygame.SRCALPHA)
+            for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):  # a faint light outline so you stand out
+                out.blit(rim, (ox, oy))
+            out.blit(s, (0, 0))
+            self.mob_img[key] = pygame.transform.flip(out, True, False) if left else out
+        return self.mob_img[key]
 
     def make_hero(self):
         p = Painter(1, 1)
@@ -527,14 +559,18 @@ class Game:
             self.end_turn()
 
     def attack(self, m):
-        hit = min(0.95, max(0.3, 0.82 + (self.lvl - m.sp.defn - m.tier) * 0.04))
+        if self.char:                                       # do one of your weapon's moves
+            import charcreate
+            style = charcreate.STYLE.get(self.char["look"][1], "unarmed")
+            self.anim = (style, random.choice(charcreate.MOVES[style]), time.monotonic())
+        hit = min(0.95, max(0.3, 0.82 + (self.lvl - m.sp.defn - m.tier) * 0.04 + (self.stat["AGI"] - 5) * 0.02))
         if not m.angry:
             m.angry = True
             self.say(f"The {m.name} turns on you!")
         if random.random() > hit:
             self.say(f"You miss the {m.name}.")
             return
-        d = max(1, random.randint(2, 5) + self.lvl - 1 - m.sp.defn)
+        d = max(1, random.randint(2, 5) + self.lvl - 1 - m.sp.defn + (self.stat["STR"] - 5) // 2)
         m.hp -= d
         self.flash[m.id] = time.monotonic()
         self.amb.fx("hit")
@@ -548,7 +584,7 @@ class Game:
             while self.xp >= self.lvl * 25:
                 self.xp -= self.lvl * 25
                 self.lvl += 1
-                self.maxhp += 6
+                self.maxhp += 4 + self.stat["TOU"] // 2
                 self.hp = self.maxhp
                 self.say(f"You feel stronger: level {self.lvl}! Fully healed.")
                 self.amb.fx("level")
@@ -655,7 +691,7 @@ class Game:
         self.phase = phase
 
     def hurt_by(self, m):
-        if random.random() > 0.7:
+        if random.random() > 0.7 - (self.stat["AGI"] - 5) * 0.02:
             self.say(f"The {m.name} misses you.")
             return
         lo, hi = m.dmg()
@@ -878,7 +914,30 @@ class Game:
             S.blit(g, (fx - g.get_width() // 2, fy - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
         hx, hy = self.px * PX - cxp, self.py * PX - cyp + top
         S.blit(self.foot_shadow(), (hx + 4, hy + PX - 9))
-        S.blit(self.hero, (hx, hy))
+        if self.char:
+            import charcreate
+            left = getattr(self, "facing", (1, 0))[0] < 0
+            anim = getattr(self, "anim", None)
+            if anim and now - anim[2] < 0.55:              # doing a move: draw it live, posed
+                u = (now - anim[2]) / 0.55
+                pose, fxs, hit = charcreate.pose_for(anim[0], anim[1], u, int(PX * 1.1))
+                d = PX * 3
+                tmp = pygame.Surface((d, d), pygame.SRCALPHA)
+                pose = dict(pose)
+                for k_ in ("dx", "wdx"):
+                    pose[k_] = pose.get(k_, 0) * 0.35
+                charcreate.draw_char(tmp, d // 2, d // 2, int(PX * 1.1), self.char["body"], self.char_look(),
+                                     tuple(self.char["skin_rgb"]), self.char.get("mutation"), pose)
+                if left:
+                    tmp = pygame.transform.flip(tmp, True, False)
+                S.blit(tmp, (hx + PX // 2 - d // 2, hy + PX // 2 - d // 2 - 6))
+                if "flash" in [f[0] for f in fxs]:
+                    pygame.draw.circle(S, (255, 230, 140), (hx + PX // 2 + (-PX if left else PX), hy + PX // 2), 5)
+            else:
+                hs = self.hero_surface(left)
+                S.blit(hs, (hx + PX // 2 - hs.get_width() // 2, hy + PX // 2 - hs.get_height() // 2 - 6))
+        else:
+            S.blit(self.hero, (hx, hy))
         S.set_clip(None)
         if S is not self.screen:
             scale = pygame.transform.scale if z > 1 else pygame.transform.smoothscale
@@ -1009,7 +1068,8 @@ class Game:
         self.screen.blit(self.small.render(f"HP {self.hp}/{self.maxhp}", True, (255, 255, 255)), (bx + 6, 7))
         danger = 1 + self.w.tier(self.px // CS, self.py // CS)
         day, phase, _, _ = self.clock()
-        info = f"Level {self.lvl}   XP {self.xp}/{self.lvl * 25}   Day {day}, {phase}   Danger " + "*" * danger
+        who = f"{self.char['name']} ({self.char['archetype']})   " if self.char else ""
+        info = who + f"Lv {self.lvl}   XP {self.xp}/{self.lvl * 25}   Day {day}, {phase}   Danger " + "*" * danger
         self.screen.blit(self.font.render(info, True, (190, 190, 200)), (bx + 175, 5))
         expl = self.font.render(f"Explored {len(self.w.visited)}   Seed {self.w.seed}", True, (110, 110, 120))
         self.screen.blit(expl, (sw - expl.get_width() - 10, 6))
@@ -1063,10 +1123,12 @@ def main():
     screen = pygame.display.set_mode((1280, 800), pygame.RESIZABLE)
     pygame.display.set_caption("Roguelike prototype")
     if not any(f in args for f in ("--play", "--new", "--seed", "--showcase", "--structures", "--shot")):
-        import charcreate                                # the game opens on character creation (for now, a preview)
-        charcreate.run(screen, ROOT)
-        pygame.quit()
-        return
+        import charcreate                                # the game opens on character creation
+        ch = charcreate.run(screen, ROOT)
+        if not ch:
+            pygame.quit()
+            return
+        args.append("--new")                             # a new character gets a new world
     screen.fill((0, 0, 0))
     f = pygame.font.Font(None, 36)
     screen.blit(f.render("Making the world…", True, (220, 220, 220)), (40, 40))

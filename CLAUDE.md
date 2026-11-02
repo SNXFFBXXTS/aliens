@@ -7,7 +7,10 @@ Original goal: standalone 2D roguelike, Caves of Qud-inspired *look* (own art, n
 huge generated world, thousands of spells/items, towns, shops, roads; places are random until visited, then permanent.
 
 ## Run
-`rl` (launcher `~/.local/bin/rl` -> `python3 game/rl.py`), `rl --new`, `rl --seed N`. Needs `python-pygame`.
+`rl` opens character creation (charcreate.py: 30 archetypes + make-your-own builder, spar with a dummy);
+Enter makes a NEW world and plays as that character (symbol + gear glyphs, stats drive HP/hit/dodge/damage,
+moves animate on attack). `rl --play` continues the current world with ~/.local/share/roguelike/character.json.
+Launcher: `rl` (launcher `~/.local/bin/rl` -> `python3 game/rl.py`), `rl --new`, `rl --seed N`. Needs `python-pygame`.
 Saves: `~/.local/share/roguelike/world-<seed>/` (chunks/*.json = cells + creatures, player.json). `RL_HOME` overrides (testing).
 Headless test: `RL_HOME=/tmp/x SDL_VIDEODRIVER=dummy python3 game/rl.py --seed 1337 --shot out.png --moves RRDDW`.
 
