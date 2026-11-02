@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Walkable prototype: wander the generated world, meet its creatures, fight.
 
-  rl            carry on in your world (makes one the first time)
+  rl            character creation (preview)
+  rl --play     carry on in your world (makes one the first time)
   rl --new      start a brand new world (new seed)
   rl --seed N   start a world from a given seed
 
@@ -1061,6 +1062,11 @@ def main():
     pygame.key.set_repeat()                               # off: held keys are handled by Game.walk_held
     screen = pygame.display.set_mode((1280, 800), pygame.RESIZABLE)
     pygame.display.set_caption("Roguelike prototype")
+    if not any(f in args for f in ("--play", "--new", "--seed", "--showcase", "--structures", "--shot")):
+        import charcreate                                # the game opens on character creation (for now, a preview)
+        charcreate.run(screen, ROOT)
+        pygame.quit()
+        return
     screen.fill((0, 0, 0))
     f = pygame.font.Font(None, 36)
     screen.blit(f.render("Making the world…", True, (220, 220, 220)), (40, 40))

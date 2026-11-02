@@ -469,7 +469,7 @@ L("egypt_temple", "a temple of columns", {"desert", "salt", "badlands"},
 L("egypt_tombs", "a valley of tombs", {"desert", "badlands", "salt"},
   ["%%%  %%%  %%%", "%T%  %T%  %T%", "%+%  %+%  %+%", "             ", "  M      o   "], {"T": "sarcoph", "M": "mech", "o": "obelisk"},
   "Tomb doors cut into broken walls, every one pried open. A dead mech lies where it was left guarding them.")
-L("pylonline", "a line of power pylons", {"grass", "meadow", "savanna", "tundra", "hills", "desert", "badlands"},
+L("pylonline", "a line of power pylons", {"tundra"},
   ["P     P     P     P"], {"P": "pylon"}, "Pylons stride across the land, their wires long gone. They still hum.")
 L("neonstrip", "a dead neon strip", {"grass", "ash", "fungal", "crystal", "badlands", "savanna"},
   ["B   n   B   n", "             ", "  c  J  c  Y ", "             ", "n   B   K   n"],
@@ -518,14 +518,14 @@ L("triumph", "a triumphal arch", {"hills", "meadow", "grass", "beach"},
 LAYOUTS = {"roman": ["roman_temple", "roman_forum", "aqueduct", "colosseum", "villa", "triumph"],"aztec": ["aztec_temple", "aztec_court", "aztec_plaza", "shrine", "cemetery"],
            "egypt": ["egypt_pyramid", "egypt_temple", "egypt_tombs", "mechyard", "caravan"],
            "soviet": ["soviet", "pipeline", "woodpecker", "radome", "bunker"],
-           "rural": ["silos", "pylonline", "farmstead", "neonstrip", "windfarm"],
+           "rural": ["silos", "farmstead", "neonstrip", "windfarm"],
            "alien": ["shrine_tech", "neonstrip", "mechyard", "monolith", "stones"]}
 
 # relics scattered through the land, not just in ruin sites
 SCATTER = {"roman": [("p_rcolumn", 0.006), ("p_drums", 0.005), ("p_rstatue", 0.002), ("p_amphora", 0.003), ("p_milestone", 0.002)],"aztec": [("p_stela", 0.006), ("p_serpent", 0.004), ("p_pipes", 0.003), ("p_neon", 0.002), ("p_cables", 0.004)],
-           "egypt": [("p_column", 0.008), ("p_sarcoph", 0.002), ("p_anubis", 0.002), ("p_pylon", 0.003), ("p_mech", 0.0015)],
-           "soviet": [("p_statue", 0.0015), ("p_pylon", 0.004), ("p_pipes", 0.004), ("p_cctv", 0.002)],
-           "rural": [("p_pylon", 0.004), ("p_billboard", 0.002), ("p_silo", 0.0012), ("p_cctv", 0.0015)],
+           "egypt": [("p_column", 0.008), ("p_sarcoph", 0.002), ("p_anubis", 0.002), ("p_pylon", 0.0004), ("p_mech", 0.0015)],
+           "soviet": [("p_statue", 0.0015), ("p_pylon", 0.0005), ("p_pipes", 0.004), ("p_cctv", 0.002)],
+           "rural": [("p_pylon", 0.0006), ("p_billboard", 0.002), ("p_silo", 0.0012), ("p_cctv", 0.0015)],
            "alien": [("p_cables", 0.005), ("p_neon", 0.003), ("p_mech", 0.002)]}
 for b, cul in CULTURE.items():
     if b in weird.BIOMES:
