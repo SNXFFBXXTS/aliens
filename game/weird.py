@@ -426,7 +426,7 @@ def g_hand(rng):
             px, py = nx, ny
         disc(c, px, py, 0.55, "3")                                 # nail
     if rng.random() < 0.5:
-        disc(c, 7.75 + lean, 9.5, 1.1, "3"); put(c, 7.75 + lean, 9.5, "2")   # an eye in the palm
+        disc(c, 7.75 + lean, 9.5, 1.1, "3")                         # a glowing knot in the palm
     return c
 
 
@@ -608,7 +608,7 @@ def g_chandelier(rng):
     return c
 
 
-WEIRD = ("hand", "eyestalk", "jelly", "spiral", "mouth", "tentacle", "brain", "cubes", "ring", "totem", "melt", "chandelier")
+WEIRD = ("hand", "jelly", "spiral", "tentacle", "brain", "cubes", "ring", "melt", "chandelier")   # no faces: monsters have those
 NEON = ("eye", "bloom", "lumen", "prism", "blood", "lava", "frost", "spore")
 
 GEN = {"spire": g_spire, "canopy": g_canopy, "coral": g_coral, "bulb": g_bulb, "eye": g_eye, "stalks": g_stalks,
@@ -629,24 +629,24 @@ PROP_COLOURS = {}      # filled in by structures.py: "p_name" -> colours for '1'
 
 # biome: family, accent family for '3' (None = own), [(kind, density)], ground marks per cell
 BIOMES = {
-    "grass": ("moss", None, [("spiral", 0.03), ("ring", 0.02), ("totem", 0.01), ("tuft", 0.45), ("stalks", 0.1), ("twist", 0.05), ("spire", 0.04)], 2),
-    "meadow": ("bloom", None, [("eyestalk", 0.04), ("spiral", 0.04), ("chandelier", 0.03), ("tuft", 0.4), ("stalks", 0.15), ("willow", 0.08), ("bulb", 0.05)], 2),
-    "savanna": ("ochre", None, [("hand", 0.03), ("totem", 0.02), ("tuft", 0.5), ("fronds", 0.08), ("spire", 0.05), ("spikes", 0.04)], 2),
-    "forest": ("witch", "eye", [("hand", 0.06), ("melt", 0.06), ("eyestalk", 0.04), ("canopy", 0.25), ("tiers", 0.14), ("willow", 0.1), ("twist", 0.08), ("spire", 0.08),
-                                ("eye", 0.04), ("tuft", 0.12)], 1),
-    "jungle": ("lumen", None, [("tentacle", 0.07), ("jelly", 0.06), ("mouth", 0.05), ("chandelier", 0.05), ("coral", 0.22), ("fronds", 0.2), ("bulb", 0.15), ("canopy", 0.1), ("tuft", 0.2)], 2),
-    "swamp": ("bog", None, [("tentacle", 0.08), ("melt", 0.06), ("eyestalk", 0.04), ("tuft", 0.25), ("stalks", 0.25), ("willow", 0.12), ("bulb", 0.08)], 2),
+    "grass": ("moss", None, [("spiral", 0.03), ("ring", 0.02), ("tuft", 0.45), ("stalks", 0.1), ("twist", 0.05), ("spire", 0.04)], 2),
+    "meadow": ("bloom", None, [("spiral", 0.04), ("chandelier", 0.03), ("tuft", 0.4), ("stalks", 0.15), ("willow", 0.08), ("bulb", 0.05)], 2),
+    "savanna": ("ochre", None, [("hand", 0.03), ("tuft", 0.5), ("fronds", 0.08), ("spire", 0.05), ("spikes", 0.04)], 2),
+    "forest": ("witch", "eye", [("hand", 0.06), ("melt", 0.06), ("canopy", 0.25), ("tiers", 0.14), ("willow", 0.1), ("twist", 0.08), ("spire", 0.08),
+                                ("tuft", 0.12)], 1),
+    "jungle": ("lumen", None, [("tentacle", 0.07), ("jelly", 0.06), ("chandelier", 0.05), ("coral", 0.22), ("fronds", 0.2), ("bulb", 0.15), ("canopy", 0.1), ("tuft", 0.2)], 2),
+    "swamp": ("bog", None, [("tentacle", 0.08), ("melt", 0.06), ("tuft", 0.25), ("stalks", 0.25), ("willow", 0.12), ("bulb", 0.08)], 2),
     "taiga": ("frost", None, [("hand", 0.04), ("ring", 0.03), ("tiers", 0.4), ("spire", 0.12), ("shard", 0.05)], 1),
     "tundra": ("ice", None, [("ring", 0.04), ("cubes", 0.03), ("tuft", 0.12), ("shard", 0.08), ("spikes", 0.04)], 1),
     "icesheet": ("ice", None, [("shard", 0.3)], 1), "drift": ("ice", None, [("shard", 0.12), ("rock", 0.06)], 2),
-    "desert": ("dune", None, [("mouth", 0.03), ("totem", 0.03), ("cubes", 0.02), ("pillar", 0.05), ("ribs", 0.03), ("spikes", 0.02), ("shard", 0.015)], 2),
+    "desert": ("dune", None, [("cubes", 0.02), ("pillar", 0.05), ("ribs", 0.03), ("spikes", 0.02), ("shard", 0.015)], 2),
     "salt": ("salt", None, [("shard", 0.12)], 2),
-    "badlands": ("rust", None, [("totem", 0.05), ("hand", 0.03), ("pillar", 0.1), ("spikes", 0.08), ("ribs", 0.04)], 2),
+    "badlands": ("rust", None, [("hand", 0.03), ("pillar", 0.1), ("spikes", 0.08), ("ribs", 0.04)], 2),
     "hills": ("moss", None, [("ring", 0.02), ("spiral", 0.02), ("tuft", 0.3), ("rock", 0.1), ("twist", 0.04), ("stalks", 0.06)], 2),
     "mountain": ("stone", None, [("peak", 0.5), ("rock", 0.35)], 1), "peak": ("stone", "ice", [("peak", 0.8), ("rock", 0.2)], 1),
     "ash": ("ash", "lava", [("melt", 0.05), ("brain", 0.03), ("hand", 0.02), ("fire", 0.02), ("spikes", 0.1), ("ribs", 0.04), ("rock", 0.05)], 2),
     "crust": ("ash", "lava", [("fire", 0.03)], 1), "volcano": ("ash", "lava", [("cone", 1.0)], 1),
-    "fungal": ("spore", None, [("jelly", 0.1), ("brain", 0.08), ("spiral", 0.06), ("eyestalk", 0.06), ("shroom", 0.3), ("orbs", 0.14), ("bulb", 0.06), ("tuft", 0.1)], 2),
+    "fungal": ("spore", None, [("jelly", 0.1), ("brain", 0.08), ("spiral", 0.06), ("shroom", 0.3), ("orbs", 0.14), ("bulb", 0.06), ("tuft", 0.1)], 2),
     "crystal": ("prism", None, [("cubes", 0.12), ("ring", 0.07), ("shard", 0.45)], 2),
     "beach": ("salt", None, [("tuft", 0.08), ("fronds", 0.03)], 1),
     "trail": ("brick", None, [], 2),
@@ -669,8 +669,9 @@ def mutate(c, rng):
     for _ in range(rng.integers(1, 4)):
         i = rng.integers(len(ys)); x, y = xs[i] / _res, ys[i] / _res
         m = rng.integers(4)
-        if m == 0:                                    # an eye
-            disc(c, x, y, 1.6, "3"); put(c, x, y, "2")
+        if m == 0:                                    # a cluster of seed pods
+            for _ in range(3):
+                disc(c, x + rng.uniform(-1.5, 1.5), y + rng.uniform(-1.5, 1.5), 0.7, "3")
         elif m == 1:                                  # floating orb
             disc(c, x + rng.integers(-3, 4), y - rng.integers(2, 5), 1.0, "3")
         elif m == 2:                                  # drip
@@ -797,7 +798,7 @@ def ground(p, x, y, fam, r):
     c[g > 0.94] = F(fam, 2)
 
 
-BUILT = {"wall", "wwall", "ruin", "floor", "wfloor", "packed", "scorch", "railh", "railv"}
+BUILT = {"wall", "wwall", "ruin", "floor", "wfloor", "packed", "scorch", "railh", "railv", "mosaic"}
 
 
 WALLS = ("wall", "wwall", "ruin")
@@ -811,33 +812,44 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
     g = np.random.default_rng(int(r[0] * 1e9) & 0xFFFFFFFF).random((TS, TS))
     yy, xx = np.mgrid[0:TS, 0:TS]
     gx, gy = int(r[1] * 977), int(r[2] * 977)
-    if b in ("wall", "ruin"):
-        c[:] = F("cobble", 3)
-        c[(yy % 8 == 0) | (((xx + (yy // 8) * 6) % 12) == 0)] = F("cobble", 2)       # block courses
+    if b in ("wall", "ruin", "wwall"):
+        thin = (up or down) and not (left or right)      # a wall running up the screen is seen edge-on: narrow
+        t = np.empty((TS, TS), np.uint8)
+        if b == "wwall":
+            t[:] = np.where((xx // 5) % 2 == 0, F("wood", 3), F("wood", 4))
+            t[xx % 5 == 0] = F("wood", 1)
+            lit, mid, dim = F("wood", 5), F("wood", 4), F("wood", 1)
+        else:
+            t[:] = F("cobble", 3)
+            t[(yy % 8 == 0) | (((xx + (yy // 8) * 6) % 12) == 0)] = F("cobble", 2)   # block courses
+            t[g < 0.06] = F("cobble", 2)
+            lit, mid, dim = F("cobble", 5), F("cobble", 4), F("cobble", 1)
+        a0, a1 = (11, 21) if thin else (0, TS)            # the columns the wall actually fills
         if not up:
-            c[:6] = F("cobble", 5); c[:6][g[:6] < 0.2] = F("cobble", 4)             # top face catches the light
+            t[:6] = lit                                     # top face catches the light
         if not down:
-            c[-4:] = F("cobble", 1)                                                 # foot in shadow
-        if not left:
-            c[:, :2] = F("cobble", 4)                                               # lit left edge
-        if not right:
-            c[:, -2:] = F("cobble", 1)                                              # shaded right edge
-        c[g < 0.06] = F("cobble", 2)
-        if b == "ruin":                                                             # broken: chunks gone, rubble
+            t[-4:] = dim                                    # foot in shadow
+        if not left or thin:
+            t[:, a0:a0 + 2] = mid                           # lit left edge
+        if not right or thin:
+            t[:, a1 - 2:a1] = dim                           # shaded right edge
+        if b == "ruin":                                     # broken: chunks gone, rubble
             hole = (_clumpy((TS, TS), np.random.default_rng(gx * 31 + gy), 9) > 0.55)
-            c[hole] = np.where(g[hole] < 0.4, F("cobble", 1), np.where(g[hole] < 0.8, F("cobble", 2), F("dirt", 1)))
-    elif b == "wwall":
-        c[:] = np.where((xx // 5) % 2 == 0, F("wood", 3), F("wood", 4))
-        c[xx % 5 == 0] = F("wood", 1)
-        if not up:
-            c[:5] = F("wood", 5)
-        if not down:
-            c[-4:] = F("wood", 1)
-        if not left:
-            c[:, :2] = F("wood", 4)
-        if not right:
-            c[:, -2:] = F("wood", 1)
-        c[g < 0.04] = F("wood", 2)
+            t[hole] = np.where(g[hole] < 0.4, F("cobble", 1), np.where(g[hole] < 0.8, F("cobble", 2), F("dirt", 1)))
+        if thin:
+            c[:, a1:a1 + 4] = SHADE[c[:, a1:a1 + 4]]        # its shadow on the ground beside it
+            c[:, a0:a1] = t[:, a0:a1]
+        else:
+            c[:] = t
+    elif b == "mosaic":                                  # Roman mosaic: tesserae in a key pattern, some lost
+        wxp, wyp = (xx + gx * 0) // 4, yy // 4
+        X, Y = wxp + x * (TS // 4), wyp + y * (TS // 4)
+        key = ((X // 3 + Y // 3) % 2 == 0) ^ ((X % 6 == 0) | (Y % 6 == 0))
+        c[:] = np.where(key, F("clay", 4), F("salt", 5))
+        c[(X % 12 == 0) | (Y % 12 == 0)] = F("ochre", 4)
+        c[(xx % 4 == 0) | (yy % 4 == 0)] = F("cobble", 2)                         # grout
+        lost = _clumpy((TS, TS), np.random.default_rng(gx * 13 + gy), 7) > 0.62
+        c[lost] = np.where(g[lost] < 0.5, F("dirt", 1), F("dirt", 2))
     elif b == "floor":
         c[:] = np.where(g < 0.25, F("cobble", 1), F("cobble", 2))
         c[(yy % 16 == 0) | (xx % 16 == 0)] = F("cobble", 1)

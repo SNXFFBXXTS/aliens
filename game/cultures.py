@@ -8,8 +8,9 @@ from weird import canvas, put, line, disc, F
 
 CULTURE = {"forest": "aztec", "jungle": "aztec", "swamp": "aztec",
            "desert": "egypt", "salt": "egypt", "badlands": "egypt", "savanna": "egypt",
-           "tundra": "soviet", "taiga": "soviet", "icesheet": "soviet", "drift": "soviet", "hills": "soviet",
-           "grass": "rural", "meadow": "rural", "beach": "rural",
+           "tundra": "soviet", "taiga": "soviet", "icesheet": "soviet", "drift": "soviet",
+           "hills": "roman", "meadow": "roman", "beach": "roman",
+           "grass": "rural",
            "fungal": "alien", "crystal": "alien", "ash": "alien", "crust": "alien"}
 
 
@@ -272,7 +273,142 @@ def p_statue(r):
     return c
 
 
+# ── Roman ──
+def p_rcolumn(r):
+    c = canvas()
+    broken = r.random() < 0.5
+    top = 2.5 if not broken else r.uniform(5, 10)
+    _fill(c, 5.5, 13.5, 9.5, 15.5, "2")                              # base
+    _fill(c, 6.2, top + 1.2, 8.8, 13.5, "1")
+    for x in (6.7, 7.5, 8.3):                                        # fluting
+        line(c, x, top + 1.5, x, 13.3, "2")
+    if not broken:
+        _fill(c, 5, 1.5, 10, 3.2, "1")                               # Corinthian capital
+        for k in range(4):
+            disc(c, 5.4 + k * 1.4, 2.2, 0.6, "2")
+        line(c, 4.6, 1.5, 10.4, 1.5, "3")
+    else:
+        for k in range(6):                                           # jagged break
+            put(c, 6.2 + k * 0.5, top + 1.2 - (k % 2) * 0.6, "3")
+    if r.random() < 0.35:                                            # a spray tag on it
+        line(c, 6.4, 9, 8.6, 10, "3"); line(c, 6.4, 10, 8.6, 9, "3")
+    return c
+
+
+def p_drums(r):
+    c = canvas()
+    for k, (x, y, rr) in enumerate(((3.5, 13.5, 1.8), (7.5, 14, 1.8), (11.5, 13.2, 1.8))):
+        if k == 2 and r.random() < 0.4:
+            continue
+        _fill(c, x - 1.5, y - rr, x + 1.5, y + rr * 0.6, "1")
+        disc(c, x + 1.5, y - rr * 0.2, rr * 0.8, "2")
+        line(c, x - 1.5, y - rr, x + 1.5, y - rr, "3")
+    return c
+
+
+def p_arch(r):
+    c = canvas()
+    _fill(c, 2, 4, 5, 15.5, "1"); _fill(c, 10.5, 4, 13.5, 15.5, "1")
+    for a in np.linspace(math.pi, 2 * math.pi, 90):                  # the arch and its voussoirs
+        for rr in np.arange(2.8, 5.8, 0.25):
+            put(c, 7.75 + math.cos(a) * rr, 7 + math.sin(a) * rr, "1")
+        put(c, 7.75 + math.cos(a) * 5.8, 7 + math.sin(a) * 5.8, "3")
+    for a in np.linspace(math.pi, 2 * math.pi, 9):
+        line(c, 7.75 + math.cos(a) * 2.8, 7 + math.sin(a) * 2.8, 7.75 + math.cos(a) * 5.8, 7 + math.sin(a) * 5.8, "2")
+    _fill(c, 1.5, 1, 14, 2, "1")
+    if r.random() < 0.5:                                             # half of it has fallen
+        for y in np.arange(0, 9, 0.25):
+            line(c, 11 + math.sin(y) * 0.8, y, 15.9, y, ".")
+    line(c, 5, 4, 5, 15.5, "2"); line(c, 13.5, 4, 13.5, 15.5, "2")
+    return c
+
+
+def p_aqueduct(r):
+    c = canvas()
+    _fill(c, 0, 1, 15.9, 3, "1"); line(c, 0, 1, 15.9, 1, "3")         # the channel on top
+    for k in range(2):
+        x0 = k * 8
+        _fill(c, x0, 3, x0 + 1.6, 15.5, "1")
+        for a in np.linspace(math.pi, 2 * math.pi, 50):
+            for rr in np.arange(2.6, 3.4, 0.25):
+                put(c, x0 + 4.8 + math.cos(a) * rr, 7 + math.sin(a) * rr * 1.2, "1")
+        line(c, x0 + 1.6, 3, x0 + 1.6, 15.5, "2")
+    _fill(c, 14.3, 3, 15.9, 15.5, "1")
+    if r.random() < 0.4:
+        for y in np.arange(0, 6, 0.25):
+            line(c, 12 + math.sin(y * 2) * 0.6, y, 15.9, y, ".")
+    return c
+
+
+def p_pediment(r):
+    c = canvas()
+    for y in np.arange(1, 5, 0.25):                                  # the pediment
+        w = (y - 1) / 4 * 7.6
+        line(c, 7.75 - w, y, 7.75 + w, y, "1")
+    line(c, 0.2, 5, 15.3, 5, "3")
+    _fill(c, 0.5, 5, 15, 6.4, "2")                                   # frieze
+    for x in np.arange(1.2, 14.6, 1.2):
+        put(c, x, 5.7, "1")
+    for x in (2, 5.6, 9.2, 12.8):                                    # columns
+        if x == 12.8 and r.random() < 0.5:
+            _fill(c, x - 0.7, 12, x + 0.7, 13.6, "1"); continue      # one has fallen
+        _fill(c, x - 0.7, 6.4, x + 0.7, 13.6, "1")
+        line(c, x, 6.6, x, 13.4, "2")
+    for k in range(3):                                               # steps
+        _fill(c, 0.2 - k * 0.3 + 0.6, 13.6 + k * 0.7, 15.3 + k * 0.3 - 0.6, 14.3 + k * 0.7, "2" if k % 2 else "1")
+    line(c, 4, 5.4, 11, 5.4, "3") if r.random() < 0.5 else None     # graffiti across the frieze
+    return c
+
+
+def p_rstatue(r):
+    c = canvas()
+    _fill(c, 5, 12, 10.5, 15.5, "2")                                 # plinth
+    _fill(c, 6.2, 5, 9.4, 12, "1")                                   # a draped figure, head long gone
+    for k in range(4):
+        line(c, 6.4 + k * 0.8, 6, 6.8 + k * 0.6, 11.8, "2")
+    line(c, 6.2, 5, 9.4, 5, "3")
+    line(c, 9.4, 6, 11, 8.5, "1")                                    # one arm, raised
+    return c
+
+
+def p_amphora(r):
+    c = canvas()
+    for y in np.arange(7, 14.5, 0.25):
+        w = 1.8 * math.sin((y - 6.5) / 8 * math.pi) + 0.4
+        line(c, 7.5 - w, y, 7.5 + w, y, "1")
+    line(c, 6.8, 6, 8.2, 6, "2"); line(c, 6.5, 7.5, 5.8, 9, "2"); line(c, 8.5, 7.5, 9.2, 9, "2")
+    line(c, 6, 10.5, 9, 10.5, "3")
+    return c
+
+
+def p_milestone(r):
+    c = canvas()
+    _fill(c, 6, 7, 9.5, 15.5, "1")
+    disc(c, 7.75, 7, 1.75, "1")
+    for y in (9, 10.5, 12):
+        line(c, 6.6, y, 8.9, y, "2")
+    return c
+
+
+def p_fencev(r):
+    """a fence running up the screen: seen edge-on it's just a skinny line of posts and rails"""
+    c = canvas()
+    line(c, 7.2, 0, 7.2, 15.9, "1"); line(c, 8.2, 0, 8.2, 15.9, "1")
+    for y in (4, 12):
+        _fill(c, 6.8, y - 1.5, 8.7, y + 1.5, "2"); line(c, 6.8, y - 1.5, 8.7, y - 1.5, "3")
+    return c
+
+
 NEW = {
+    "rcolumn": (p_rcolumn, 4, True, ("salt", 5), ("salt", 3), ("bloom", 6)),
+    "drums": (p_drums, 2, True, ("salt", 5), ("salt", 3), ("salt", 6)),
+    "arch": (p_arch, 6, True, ("dune", 5), ("dune", 3), ("dune", 6)),
+    "aqueduct": (p_aqueduct, 8, True, ("dune", 5), ("dune", 3), ("dune", 6)),
+    "pediment": (p_pediment, 8, True, ("salt", 5), ("salt", 3), ("bloom", 6)),
+    "rstatue": (p_rstatue, 5, True, ("salt", 5), ("salt", 3), ("salt", 6)),
+    "amphora": (p_amphora, 2, True, ("clay", 4), ("clay", 2), ("ochre", 5)),
+    "milestone": (p_milestone, 2, True, ("stone", 4), ("stone", 2), ("stone", 5)),
+    "fencev": (p_fencev, 2, True, ("wood", 4), ("wood", 2), ("wood", 5)),
     "steppyr": (p_steppyr, 8, True, ("stone", 4), ("stone", 2), ("lumen", 6)),
     "serpent": (p_serpent, 4, True, ("stone", 4), ("stone", 2), ("lumen", 6)),
     "stela": (p_stela, 4, True, ("stone", 4), ("stone", 2), ("lumen", 5)),
@@ -293,7 +429,9 @@ NEW = {
     "silo": (p_silo, 6, True, ("rust", 4), ("rust", 2), ("salt", 5)),
     "statue": (p_statue, 6, True, ("cobble", 4), ("cobble", 2), ("cobble", 6)),
 }
-NAMES = {"steppyr": "stepped pyramid", "serpent": "serpent head", "stela": "carved stela", "skullrack": "skull rack",
+NAMES = {"rcolumn": "column", "drums": "fallen column", "arch": "arch", "aqueduct": "aqueduct", "pediment": "temple front",
+         "rstatue": "headless statue", "amphora": "amphora", "milestone": "milestone", "fencev": "fence",
+         "steppyr": "stepped pyramid", "serpent": "serpent head", "stela": "carved stela", "skullrack": "skull rack",
          "ballring": "ball-court ring", "pyramid": "pyramid", "sphinx": "sphinx", "column": "column", "sarcoph": "sarcophagus",
          "anubis": "jackal statue", "pylon": "pylon", "neon": "neon sign", "billboard": "billboard", "pipes": "pipes",
          "cables": "cables", "mech": "dead mech", "cctv": "camera pole", "silo": "silo", "statue": "statue"}
@@ -354,14 +492,37 @@ L("shrine_tech", "a wired shrine", {"fungal", "crystal", "ash", "jungle"},
   [" c   I   c ", "  K _A_ K  ", " n   M   n "], {"I": "idol", "A": "altar", "K": "cables", "n": "neon", "M": "mech", "c": "candle"},
   "An idol plugged into a nest of cables, a dead mech kneeling before it, neon halos buzzing overhead.")
 
-LAYOUTS = {"aztec": ["aztec_temple", "aztec_court", "aztec_plaza", "shrine", "cemetery"],
+L("roman_temple", "a Roman temple", {"hills", "meadow", "beach", "grass"},
+  ["  xxxxx  ", "  xxPxx  ", "   ~~~   ", " C ~~~ C ", " S ~~~ S ", "   ~~~   ", " D     n "],
+  {"P": "pediment", "x": "solid", "C": "rcolumn", "S": "rstatue", "D": "drums", "n": "neon"},
+  "A temple front still standing, columns cracked, a mosaic floor leading up to it. Someone has sprayed over the frieze.")
+L("roman_forum", "a ruined forum", {"hills", "meadow", "grass", "beach"},
+  ["C C C C C C", "           ", "~~~~~~~~~~~", "~D~~~S~~~D~", "~~~~~~~~~~~", "           ", "C C C C C C"],
+  {"C": "rcolumn", "D": "drums", "S": "rstatue"},
+  "Two rows of columns, half of them snapped, round a cracked mosaic square. Headless statues still hold their poses.")
+L("aqueduct", "an aqueduct", {"hills", "meadow", "grass", "savanna"},
+  ["A   A   A   A   A"], {"A": "aqueduct"},
+  "Stone arches march across the land, carrying water that stopped flowing centuries ago. You can walk under them.")
+L("colosseum", "a broken amphitheatre", {"hills", "meadow", "grass"},
+  ["    %%%%%    ", "  %%  R  %%  ", " %    _    % ", " %  _____  % ", "%  _______  %", "%R ___D___ R%",
+   "%  _______  %", " %  _____  % ", " %         % ", "  %%  +  %%  ", "    %% %%    "], {"R": "arch", "D": "drums"},
+  "A ring of crumbling stone round a sandy floor. The crowd is long gone, but the arches still frame it.")
+L("villa", "a ruined villa", {"hills", "meadow", "beach"},
+  ["%%%%%%%%%", "%~~~~%,,%", "%~~a~%,,%", "%~~~~+,a%", "%%+%%%%%%", "  S   m  "],
+  {"a": "amphora", "S": "rstatue", "m": "milestone"},
+  "A villa's walls stand knee-high round mosaic floors. Amphorae still sit where they were stored.")
+L("triumph", "a triumphal arch", {"hills", "meadow", "grass", "beach"},
+  [" m   xRx   m ", "     _ _     "], {"R": "arch", "x": "solid", "m": "milestone"},
+  "A great arch stands alone in the open, carved with victories nobody remembers.")
+
+LAYOUTS = {"roman": ["roman_temple", "roman_forum", "aqueduct", "colosseum", "villa", "triumph"],"aztec": ["aztec_temple", "aztec_court", "aztec_plaza", "shrine", "cemetery"],
            "egypt": ["egypt_pyramid", "egypt_temple", "egypt_tombs", "mechyard", "caravan"],
            "soviet": ["soviet", "pipeline", "woodpecker", "radome", "bunker"],
            "rural": ["silos", "pylonline", "farmstead", "neonstrip", "windfarm"],
            "alien": ["shrine_tech", "neonstrip", "mechyard", "monolith", "stones"]}
 
 # relics scattered through the land, not just in ruin sites
-SCATTER = {"aztec": [("p_stela", 0.006), ("p_serpent", 0.004), ("p_pipes", 0.003), ("p_neon", 0.002), ("p_cables", 0.004)],
+SCATTER = {"roman": [("p_rcolumn", 0.006), ("p_drums", 0.005), ("p_rstatue", 0.002), ("p_amphora", 0.003), ("p_milestone", 0.002)],"aztec": [("p_stela", 0.006), ("p_serpent", 0.004), ("p_pipes", 0.003), ("p_neon", 0.002), ("p_cables", 0.004)],
            "egypt": [("p_column", 0.008), ("p_sarcoph", 0.002), ("p_anubis", 0.002), ("p_pylon", 0.003), ("p_mech", 0.0015)],
            "soviet": [("p_statue", 0.0015), ("p_pylon", 0.004), ("p_pipes", 0.004), ("p_cctv", 0.002)],
            "rural": [("p_pylon", 0.004), ("p_billboard", 0.002), ("p_silo", 0.0012), ("p_cctv", 0.0015)],

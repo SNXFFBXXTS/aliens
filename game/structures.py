@@ -672,7 +672,8 @@ layout("chapel", "a ruined chapel", {"grass", "meadow", "forest", "hills"},
        ["%%%#%%%", "%.....%", "%.L.L.%", "%..A..%", "%.L.L.%", "%%%+%%%"], {"L": "bench", "A": "altar"},
        "The roof fell in long ago. The pews still face the altar.")
 
-CELL = {"#": "wall", "w": "wwall", "%": "ruin", ".": "floor", ",": "wfloor", "_": "packed", "*": "scorch", "+": "floor"}
+CELL = {"#": "wall", "w": "wwall", "%": "ruin", ".": "floor", ",": "wfloor", "_": "packed", "*": "scorch", "+": "floor",
+        "~": "mosaic"}
 NOT_ON = {"deep", "ocean", "shallow", "lake", "river", "bridge", "house", "plaza", "bonfire", "lava", "mountain", "peak",
           "volcano", "seaice"}
 

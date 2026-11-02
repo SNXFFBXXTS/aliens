@@ -34,10 +34,10 @@ User wants: minimal but immersive, sparse dim trees, no wading through rivers/la
 ## Content (Nov 2026)
 - structures.py: 33 abandoned-place layouts (ASCII plans + props, rotated/mirrored, ~1 in 4 zones, by biome);
   cultures.py adds a culture per region gone dystopian (forest/jungle Aztec, desert Egyptian, tundra Soviet,
-  grass rural decay, fungal/crystal/ash alien tech): 19 more props (stepped pyramid, pyramid, sphinx, pylons,
+  grass rural decay, hills/meadow/beach Roman ruins with mosaic floors, fungal/crystal/ash alien tech): 19 more props (stepped pyramid, pyramid, sphinx, pylons,
   neon, mechs...), 13 more layouts, and relics scattered through the land (BIOMES kinds starting "p_").
   "p_solid" = invisible blocked footprint for big monuments.
-- weird.py: 12 "insane" plant designs (WEIRD, per-species neon accent). Ground is painted per pixel
+- weird.py: "insane" plant designs (WEIRD, per-species neon accent). NO FACES on plants (user: monsters will have faces). Ground is painted per pixel
   (ground_pass) so nothing shows the grid; proto.gen_cells blends biomes with jittered re-classification.
 - Showcases: rl --showcase (21 biomes, alternating busy/barren via World.density), rl --structures (all layouts).
 - T = optional screen "trip" effects, OFF by default (user wanted the art insane, not the screen).

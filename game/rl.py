@@ -44,7 +44,8 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "fungal": "Fungal forest", "crystal": "Crystal fields", "lake": "Lake", "river": "River", "road": "Road",
          "bridge": "Bridge", "house": "House", "plaza": "Town", "trail": "Trail", "bonfire": "Town",
          "wall": "Wall", "wwall": "Timber wall", "ruin": "Rubble", "floor": "Concrete floor", "wfloor": "Floorboards",
-         "packed": "Packed earth", "scorch": "Scorched ground", "railh": "Railway", "railv": "Railway"}
+         "packed": "Packed earth", "scorch": "Scorched ground", "railh": "Railway", "railv": "Railway",
+         "mosaic": "Mosaic floor"}
 UNDER = {"road", "trail", "plaza", "house", "bonfire", "bridge"}     # drawn as flowing bands over the land
 BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too deep to swim.",
            "mountain": "The rock face is too steep.", "peak": "The peak is too steep to climb.",
@@ -275,6 +276,11 @@ class World:
                 elif c in UNDER and c not in ("house", "bonfire"):
                     continue
                 else:                              # trees, plants, props: the ground is already down
+                    if c == "p_fence":             # a fence running up the screen is drawn edge-on: skinny
+                        F_ = ("p_fence", "p_fencev")
+                        if (B[y + M - 1, x + M] in F_ or B[y + M + 1, x + M] in F_) and not (
+                                B[y + M, x + M - 1] in F_ or B[y + M, x + M + 1] in F_):
+                            c = "p_fencev"
                     weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing", mult=dens)
         roads, trails = self.lines(cx, cy)
         to_px = lambda L: [(pts - (cx, cy)) * CS * weird.TS for pts in L]
