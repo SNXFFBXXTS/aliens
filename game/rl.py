@@ -506,6 +506,7 @@ class Game:
             return
         before = len(self.w.visited)
         self.px, self.py = nx, ny
+        self.last_moved = time.monotonic()
         if c != self.here:
             if c == "shallow":
                 self.say("You wade into knee-deep water.")
@@ -934,9 +935,21 @@ class Game:
                 S.blit(tmp, (hx + PX // 2 - d // 2, hy + PX // 2 - d // 2 - 6))
                 if "flash" in [f[0] for f in fxs]:
                     pygame.draw.circle(S, (255, 230, 140), (hx + PX // 2 + (-PX if left else PX), hy + PX // 2), 5)
-            else:
+            else:                                          # fighting-game idle: bounce, squash and stretch, sway
                 hs = self.hero_surface(left)
-                S.blit(hs, (hx + PX // 2 - hs.get_width() // 2, hy + PX // 2 - hs.get_height() // 2 - 6))
+                w0, h0 = hs.get_size()
+                walking = now - getattr(self, "last_moved", 0) < 0.22
+                b = abs(math.sin(now * (9.0 if walking else 5.0)))       # 0..1, the bounce
+                sx = 1 + 0.06 * (0.5 - b)
+                sy = 1 - 0.08 * (0.5 - b)
+                tilt = 3 * math.sin(now * 2.4)
+                if walking:
+                    tilt += -9 if not left else 9                         # lean into the step
+                img = pygame.transform.smoothscale(hs, (max(1, int(w0 * sx)), max(1, int(h0 * sy))))
+                img = pygame.transform.rotate(img, tilt)
+                lift = int(b * (7 if walking else 4))
+                S.blit(img, (hx + PX // 2 - img.get_width() // 2,
+                             hy + PX // 2 - 6 - lift - img.get_height() // 2 + int((h0 * sy - h0) / 2)))
         else:
             S.blit(self.hero, (hx, hy))
         S.set_clip(None)
