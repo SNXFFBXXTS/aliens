@@ -30,9 +30,16 @@ Zones: 1 world square = 40x40 cells (proto.ZS), world map = travel screen (M, ar
 Art drawn at 2x (weird.RES, 32px cells); trees/huts/peaks/shards are BIG (weird.BIG, up to 64px) and drawn after
 the ground: all shadows first (weird.SHADE darkens, never blackens), then bodies back to front; trees from
 neighbouring zones that lean over the border are drawn too (weird.pick_big). Ground = dark grainy tint of the
-biome colour. Zomboid-style vision cone (rl.update_view: far ahead, 2.3 cells round you), soft darkness edges
+biome colour. All-round vision (rl.update_view, line of sight; the Zomboid cone was removed at the user's request), soft darkness edges
 (smoothscale). Sound minimal and quiet (immersion.SOUND_VERSION; one bed per zone, not per step).
 User wants: minimal but immersive, sparse dim trees, no wading through rivers/lakes.
+
+## Movement (real time)
+Not tied to squares: hold arrows/WASD/numpad to move smoothly (rl.SPEED cells/s, ACCEL), let go and you glide a little
+(FRICTION; ~0.45 cell). Game.update(dt) each frame: fx/fy = smooth position, px/py = the cell you're in (everything else
+still uses cells). Body is a small box (BODY); walls stop one axis so you slide along them; corner help eases you into
+1-wide gaps. Walking into a creature attacks it (ATTACK_S cooldown). The world takes a turn every TICK_S seconds
+whether you move or not. Creatures glide between squares when drawn (Game.mob_pos). `act()` is only used by --shot.
 
 ## Content (Nov 2026)
 - structures.py: 33 abandoned-place layouts (ASCII plans + props, rotated/mirrored, ~1 in 4 zones, by biome);

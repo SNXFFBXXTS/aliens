@@ -36,6 +36,12 @@ PX = T * SCALE                                         # pixels per cell on scre
 ROOT = os.environ.get("RL_HOME") or os.path.expanduser("~/.local/share/roguelike")
 HUD_H, LOG_H = 30, 80
 ACTIVE = 28                                            # creatures further away than this sleep
+SPEED = 5.0          # walking speed, cells a second
+ACCEL = 14.0         # how quickly you get up to speed
+FRICTION = 11.0      # how quickly you stop when you let go (glide ~ SPEED / FRICTION cells)
+BODY = 0.3           # half the width of your body, in cells
+TICK_S = 0.35        # the world takes a turn this often, in seconds
+ATTACK_S = 0.4       # fastest you can swing
 
 NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "Beach", "seaice": "Sea ice",
          "icesheet": "Ice sheet", "drift": "Snowdrifts", "tundra": "Tundra", "taiga": "Snow forest", "grass": "Grassland",
@@ -357,6 +363,7 @@ class Game:
         self.last_desc = {}
         self.mob_img = {}
         self.flash = {}                     # mob id / "you" -> time of last hit
+        self.mob_pos = {}                   # mob id -> where it's drawn (eases towards its square)
         self.dead = False
         self.killer = ""
         self.lvl, self.xp, self.turn = 1, 0, 0
@@ -380,6 +387,10 @@ class Game:
             who = f"{self.char['name']}, {self.char['archetype'].lower()}, " if self.char else "You "
             self.say(who + ("arrive" if not self.char else "arrives") + " in town. M opens the world map (travel with the arrows, M again to zoom in).")
         self.here = self.w.cell(self.px, self.py)
+        self.fx, self.fy = float(self.px), float(self.py)   # smooth position (cells); px, py = the cell you're in
+        self.vx = self.vy = 0.0
+        self._cell = (self.px, self.py)
+        self.next_tick = time.monotonic() + TICK_S
         self.update_view()
         for i in self.w.dead:
             self.w.mobs.pop(i, None)
@@ -710,16 +721,130 @@ class Game:
         self.say("You wake up back in town, aching all over. (You lost your xp towards the next level.)")
         self.save()
 
-    def walk_held(self):
-        """holding a direction key keeps walking that way at a steady pace"""
-        h = getattr(self, "hold", None)
-        if not h or self.dead or self.show_map:
+    MOVE_KEYS = {pygame.K_LEFT: (-1, 0), pygame.K_RIGHT: (1, 0), pygame.K_UP: (0, -1), pygame.K_DOWN: (0, 1),
+                 pygame.K_a: (-1, 0), pygame.K_d: (1, 0), pygame.K_w: (0, -1), pygame.K_s: (0, 1),
+                 pygame.K_KP4: (-1, 0), pygame.K_KP6: (1, 0), pygame.K_KP8: (0, -1), pygame.K_KP2: (0, 1),
+                 pygame.K_KP7: (-1, -1), pygame.K_KP9: (1, -1), pygame.K_KP1: (-1, 1), pygame.K_KP3: (1, 1)}
+
+    def blocked(self, x, y):
+        """why you can't stand in cell (x, y), or None if you can"""
+        if not self.w.inside(x // CS, y // CS):
+            return "The edge of the known world. Nothing but sea beyond."
+        c = self.w.cell(x, y)
+        if (x, y) in self.w.fires and c != "bonfire":
+            return "Flames! You keep back from the fire."
+        if c in BLOCKED:
+            return BLOCKED[c]
+        if c in structures.BLOCKING:
+            return f"A {structures.PROP_NAMES.get(c[2:], c[2:])} is in the way."
+        return None
+
+    def box_cells(self, fx, fy):
+        """cells your body overlaps when standing at (fx, fy)"""
+        cx, cy = fx + 0.5, fy + 0.5
+        return {(x, y) for x in range(math.floor(cx - BODY), math.floor(cx + BODY) + 1)
+                for y in range(math.floor(cy - BODY), math.floor(cy + BODY) + 1)}
+
+    def sync(self):
+        if (self.px, self.py) != self._cell:          # moved by something else (respawn, travel, loading)
+            self.fx, self.fy = float(self.px), float(self.py)
+            self.vx = self.vy = 0.0
+            self._cell = (self.px, self.py)
+
+    def update(self, dt):
+        """real time: glide about, bump into things, and let the world take its turns"""
+        self.sync()
+        if self.dead or self.show_map:
             return
-        key, d, t0 = h
         now = time.monotonic()
-        if now - t0 >= 0.16 and now - getattr(self, "last_step", 0) >= 0.075:
-            self.last_step = now
-            self.act(*d)
+        keys = pygame.key.get_pressed()
+        ix = iy = 0
+        for k, (dx, dy) in self.MOVE_KEYS.items():
+            if keys[k]:
+                ix += dx
+                iy += dy
+        ix, iy = max(-1, min(1, ix)), max(-1, min(1, iy))
+        if ix or iy:
+            n = math.hypot(ix, iy)
+            tx, ty = ix / n * SPEED, iy / n * SPEED
+            a = min(1.0, dt * ACCEL)
+            self.vx += (tx - self.vx) * a
+            self.vy += (ty - self.vy) * a
+            if (ix, iy) != getattr(self, "facing", None):
+                self.facing = (ix, iy)
+                self.dark = None
+        else:                                          # let go: skate to a stop
+            f = math.exp(-dt * FRICTION)
+            self.vx *= f
+            self.vy *= f
+            if abs(self.vx) < 0.05 and abs(self.vy) < 0.05:
+                self.vx = self.vy = 0.0
+        for axis in (0, 1):                            # move one axis at a time so you slide along walls
+            d = (self.vx if axis == 0 else self.vy) * dt
+            if not d:
+                continue
+            nfx, nfy = (self.fx + d, self.fy) if axis == 0 else (self.fx, self.fy + d)
+            old = self.box_cells(self.fx, self.fy)
+            hit = None
+            for q in self.box_cells(nfx, nfy) - old:
+                m = self.w.mob_at(*q)
+                if m:
+                    hit = ("mob", m)
+                    break
+                why = self.blocked(*q)
+                if why:
+                    hit = ("wall", why)
+                    break
+            if hit is None:
+                self.fx, self.fy = nfx, nfy
+                continue
+            if axis == 0:
+                self.vx = 0.0
+            else:
+                self.vy = 0.0
+            if hit[0] == "mob":
+                if now - getattr(self, "last_attack", 0) >= ATTACK_S:
+                    self.last_attack = now
+                    self.attack(hit[1])
+            else:
+                # Corner help: if you're only a little off a gap (a doorway, a path between trees),
+                # ease sideways into line with it instead of snagging on the edge.
+                if (ix == 0) if axis == 1 else (iy == 0):
+                    other = self.fx if axis == 1 else self.fy
+                    line = round(other)
+                    ahead = (line, self.py + (1 if d > 0 else -1)) if axis == 1 else \
+                            (self.px + (1 if d > 0 else -1), line)
+                    if abs(other - line) > 0.01 and not self.blocked(*ahead) and not self.w.mob_at(*ahead):
+                        step = math.copysign(min(abs(line - other), SPEED * dt), line - other)
+                        if axis == 1:
+                            self.fx += step
+                        else:
+                            self.fy += step
+                        continue
+                if now - getattr(self, "last_bump", 0) > 1.5:
+                    self.last_bump = now
+                    self.say(hit[1])
+        if abs(self.vx) + abs(self.vy) > 0.4:
+            self.last_moved = now
+        cell = (math.floor(self.fx + 0.5), math.floor(self.fy + 0.5))
+        if cell != (self.px, self.py):
+            self.enter(*cell)
+        if now >= self.next_tick:                      # the world moves on whether you do or not
+            self.next_tick = max(self.next_tick + TICK_S, now)
+            self.end_turn()
+
+    def enter(self, x, y):
+        before = len(self.w.visited)
+        self.px, self.py = x, y
+        self._cell = (x, y)
+        c = self.w.cell(x, y)
+        if c != self.here:
+            if c == "shallow":
+                self.say("You wade into knee-deep water.")
+            self.here = c                     # (the land is named once per zone, in update_view)
+        self.update_view()
+        if len(self.w.visited) > before and random.random() < 0.15:
+            self.say("New land: you're the first to walk here.")
 
     WHISPERS = ["IT SEES YOU.", "the trees are breathing.", "you have been here before.", "don't look behind you.",
                 "your hands are not your hands.", "the ground is listening.", "something is wearing the sky.",
@@ -807,8 +932,6 @@ class Game:
     def handle(self, e):
         if e.type == pygame.MOUSEWHEEL and not self.show_map:
             self.set_zoom(1 if e.y > 0 else -1)
-        if e.type == pygame.KEYUP and getattr(self, "hold", None) and e.key == self.hold[0]:
-            self.hold = None
         if e.type == pygame.KEYDOWN:
             k = e.key
             if self.dead:
@@ -827,8 +950,7 @@ class Game:
             elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and self.show_map:
                 self.show_map = False
             elif k in moves:
-                self.act(*moves[k])                 # first press: turn (or step if already facing that way)
-                self.hold = (k, moves[k], time.monotonic())
+                pass                                # walking is read from the held keys every frame (update)
             elif k in (pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_MINUS, pygame.K_MINUS):
                 self.set_zoom(+1 if k in (pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_PLUS) else -1)
             elif k == pygame.K_t:
@@ -872,8 +994,9 @@ class Game:
             S, top = self._view, 0
         now = time.monotonic()
         t = now - self.t0
-        cxp = self.px * PX + PX // 2 - sw // 2            # camera: player in the middle
-        cyp = self.py * PX + PX // 2 - vh // 2
+        self.sync()
+        cxp = int(self.fx * PX) + PX // 2 - sw // 2       # camera: player in the middle
+        cyp = int(self.fy * PX) + PX // 2 - vh // 2
         S.fill((0, 0, 0))
         c0x, c0y = cxp // (CS * PX), cyp // (CS * PX)
         c1x, c1y = (cxp + sw) // (CS * PX), (cyp + vh) // (CS * PX)
@@ -889,8 +1012,16 @@ class Game:
                 srf.set_palette(pal)
                 S.blit(srf, (cx * CS * PX - cxp, cy * CS * PX - cyp + top))
         fires = self.draw_live(S, top, t, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
+        if len(self.mob_pos) > 400:
+            self.mob_pos.clear()
         for m in self.w.mobs.values():
-            x, y = m.x * PX - cxp, m.y * PX - cyp + top
+            sx, sy = self.mob_pos.get(m.id, (m.x, m.y))       # glide between squares instead of jumping
+            if abs(sx - m.x) + abs(sy - m.y) > 3:
+                sx, sy = m.x, m.y
+            k = min(1.0, (now - getattr(self, "_last_draw", now)) * 12)
+            sx, sy = sx + (m.x - sx) * k, sy + (m.y - sy) * k
+            self.mob_pos[m.id] = (sx, sy)
+            x, y = int(sx * PX) - cxp, int(sy * PX) - cyp + top
             if (m.x, m.y) in self.vis and -PX < x < sw and top - PX < y < top + vh:
                 S.blit(self.foot_shadow(), (x + 4, y + PX - 9))
                 spr = self.mob_sprite(m)
@@ -900,12 +1031,13 @@ class Game:
                 if m.hp < m.maxhp:
                     pygame.draw.rect(S, (60, 0, 0), (x + 3, y - 3, PX - 6, 3))
                     pygame.draw.rect(S, (230, 50, 50), (x + 3, y - 3, int((PX - 6) * m.hp / m.maxhp), 3))
+        self._last_draw = now
         S.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), top - (cyp % PX)))
         glow = self.glow_frames()
         for (fx, fy) in fires:                           # firelight pushes back the dark
             g = glow[int(t * 7 + fx) % len(glow)]
             S.blit(g, (fx - g.get_width() // 2, fy - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
-        hx, hy = self.px * PX - cxp, self.py * PX - cyp + top
+        hx, hy = int(self.fx * PX) - cxp, int(self.fy * PX) - cyp + top
         S.blit(self.foot_shadow(), (hx + 4, hy + PX - 9))
         if self.char:
             import charcreate
@@ -1014,10 +1146,10 @@ class Game:
 
     def darkness(self, cxp, cyp, sw, vh):
         """black where you've never looked, dim where you remember, a soft falloff and the time-of-day tint where you see"""
-        key = (cxp, cyp, sw, vh, self.turn, self.px, self.py, getattr(self, "facing", None))
+        x0, y0 = cxp // PX, cyp // PX
+        key = (x0, y0, sw, vh, self.turn, self.px, self.py)
         if self.dark and self.dark[0] == key:
             return self.dark[1]
-        x0, y0 = cxp // PX, cyp // PX
         cols, rows = sw // PX + 2, vh // PX + 2
         _, _, _, tint = self.clock()
         a = np.zeros((rows, cols, 4), np.uint8)
@@ -1124,7 +1256,7 @@ def main():
     args = sys.argv[1:]
     os.makedirs(ROOT, exist_ok=True)
     pygame.init()
-    pygame.key.set_repeat()                               # off: held keys are handled by Game.walk_held
+    pygame.key.set_repeat()                               # off: held keys are read every frame by Game.update
     screen = pygame.display.set_mode((1280, 800), pygame.RESIZABLE)
     pygame.display.set_caption("Roguelike prototype")
     if not any(f in args for f in ("--play", "--new", "--seed", "--showcase", "--structures", "--shot")):
@@ -1169,9 +1301,9 @@ def main():
                 running = False
             elif not g.handle(e):
                 running = False
-        g.walk_held()
+        g.update(min(0.05, clock.get_time() / 1000))
         g.frame()
-        clock.tick(30)
+        clock.tick(60)
     if not g.dead:
         g.save()
     pygame.quit()
