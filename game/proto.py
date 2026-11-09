@@ -571,42 +571,35 @@ def gen_cells(wd, ox, oy, zw, zh):
     K = ZS / 12                                        # sizes below were tuned at 12 cells per square
     trace(wd.rlinks, max(1.4, 0.65 * K), "river", 1.2)
     trace(wd.dlinks, max(0.75, 0.35 * K), "road", 1.0)
-    # towns: a plaza, lanes running out of it, huts along them
+    # settlements: what the colonists built after the colony failed. A muddy clearing round a fire, shacks scattered
+    # about it facing in, tracks worn from their doors to the fire.
     for n, (tx, ty) in enumerate(wd.towns):
-        rng = np.random.default_rng(wd.seed + 5 + n * 7919)   # each town's own layout
+        rng = np.random.default_rng(wd.seed + 5 + n * 7919)   # each settlement's own layout
         lx, ly = (tx + 0.5 - ox) * ZS, (ty + 0.5 - oy) * ZS
-        reach = 34.0                                       # towns spread into the zones round the square
+        reach = 34.0
         if -reach - 2 < lx < zw + reach + 2 and -reach - 2 < ly < zh + reach + 2:
-            d2 = (i - lx) ** 2 + (j - ly) ** 2
             ok = np.isin(b, ["river", "bridge", "lake", "shallow", "ocean", "deep", "lava"], invert=True)
-            pr = 1.4 * K                                        # the square
-            b[(d2 < pr ** 2) & ok] = "plaza"
+            ang = np.arctan2(j - ly, i - lx)                    # a ragged-edged clearing of trodden mud
+            rad = 4.2 + 1.3 * np.sin(ang * 3 + rng.uniform(0, 6)) + 0.8 * np.sin(ang * 5 + rng.uniform(0, 6))
+            b[((i - lx) ** 2 + (j - ly) ** 2 < rad ** 2) & ok] = "mud"
             if 0 <= int(lx) < zw and 0 <= int(ly) < zh and ok[int(ly), int(lx)]:
-                b[int(ly), int(lx)] = "bonfire"                 # a fire in the middle of every town
-            # a 70s estate: straight roads out of the square, closes (cul-de-sacs) off them with a turning head
-            streets = []
-            for (dx, dy) in ((1, 0), (0, 1), (-1, 0), (0, -1)):
-                if rng.random() < 0.85:
-                    L = rng.uniform(reach - 6, reach)
-                    streets.append((lx + dx * pr, ly + dy * pr, dx, dy, L, "main"))
-                    for _ in range(int(rng.integers(1, 3))):
-                        t = rng.uniform(10, L - 4)
-                        side = 1 if rng.random() < 0.5 else -1
-                        streets.append((lx + dx * (pr + t), ly + dy * (pr + t), -dy * side, dx * side,
-                                        rng.uniform(12, 20), "close"))
-            for (sx, sy, dx, dy, L, kind) in streets:
-                for t in np.arange(0, L, 0.5):                   # two cells wide
-                    for o in (0, 1):
-                        x = int(math.floor(sx + dx * t + (o if dy else 0)))
-                        y = int(math.floor(sy + dy * t + (o if dx else 0)))
-                        if 0 <= x < zw and 0 <= y < zh and ok[y, x] and b[y, x] not in ("plaza", "bonfire", "road"):
-                            b[y, x] = "street"
-                if kind == "close":                              # turning head
-                    ex, ey = sx + dx * L + 0.5, sy + dy * L + 0.5
-                    head = ((i - ex) ** 2 + (j - ey) ** 2 < 2.6 ** 2) & ok
-                    b[head & ~np.isin(b, ["plaza", "bonfire", "road"])] = "street"
-            import buildings                                    # real 70s houses along them
-            buildings.town(b, ok, rng, streets, zw, zh, int(round(ox * ZS)), int(round(oy * ZS)), ZS)
+                b[int(ly), int(lx)] = "bonfire"                 # the fire they still keep going
+            import buildings
+            for k in range(int(rng.integers(4, 7))):              # paths wandering out from the fire
+                a0 = rng.uniform(0, 2 * math.pi)
+                bend, phase = rng.uniform(0.15, 0.4), rng.uniform(0, 6)
+                for t in np.arange(rad.max() if np.ndim(rad) else 4, reach, 0.5):
+                    a1 = a0 + bend * math.sin(t * 0.12 + phase)
+                    x, y = int(round(lx + math.cos(a1) * t)), int(round(ly + math.sin(a1) * t))
+                    if 0 <= x < zw and 0 <= y < zh and ok[y, x] and b[y, x] not in ("bonfire",):
+                        b[y, x] = "mud"
+            doors = buildings.settlement(b, ok, rng, lx, ly, zw, zh, int(round(ox * ZS)), int(round(oy * ZS)), ZS)
+            for (dx, dy, side) in doors:                        # a short trodden spur out of each door
+                vx, vy = {"n": (0, -1), "s": (0, 1), "w": (-1, 0), "e": (1, 0)}[side]
+                for k in range(1, 4):
+                    x, y = dx + vx * k, dy + vy * k
+                    if 0 <= x < zw and 0 <= y < zh and ok[y, x] and b[y, x] not in buildings.KEEP_OFF:
+                        b[y, x] = "mud"
     if zw == ZS and zh == ZS and abs(ox - round(ox)) < 1e-9 and abs(oy - round(oy)) < 1e-9:
         import structures                              # abandoned places (only when making a whole zone)
         structures.place(wd, b, int(round(ox)), int(round(oy)), zw, zh)

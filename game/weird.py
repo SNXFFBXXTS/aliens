@@ -818,10 +818,11 @@ def ground(p, x, y, fam, r):
 
 BUILT = {"wall", "wwall", "ruin", "floor", "wfloor", "packed", "scorch", "railh", "railv", "mosaic",
          "hwall", "hwin", "hdoor", "hfloor", "htile", "hrug",
-         "hcarpet", "hcarpetb", "hlino", "hbath", "hconc", "gdoor", "street"}
+         "hcarpet", "hcarpetb", "hlino", "hbath", "hconc", "gdoor", "street",
+         "swall_iron", "swall_wood", "swall_tarp", "swall_hull", "sgap", "sdoor", "debris", "sdirt", "spallet", "mud"}
 
 
-WALLS = ("wall", "wwall", "ruin", "hwall", "hwin")
+WALLS = ("wall", "wwall", "ruin", "hwall", "hwin", "swall_iron", "swall_wood", "swall_tarp", "swall_hull", "sgap")
 
 
 def built(p, x, y, b, r, nb=(False, False, False, False)):
@@ -832,6 +833,42 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
     g = np.random.default_rng(int(r[0] * 1e9) & 0xFFFFFFFF).random((TS, TS))
     yy, xx = np.mgrid[0:TS, 0:TS]
     gx, gy = int(r[1] * 977), int(r[2] * 977)
+    if b in ("swall_iron", "swall_wood", "swall_tarp", "swall_hull", "sgap"):   # shanty walls: whatever was to hand
+        mat = b if b != "sgap" else ("swall_iron" if (gx + gy) % 2 else "swall_wood")
+        if mat == "swall_iron":                            # corrugated iron, rust running down from the top
+            c[:] = np.where((xx // 3) % 2 == 0, F("stone", 3), F("stone", 4))
+            streak = ((xx * 7 + gx) % 11 < 3) & (yy < 8 + (xx * 13 + gy) % 18)
+            c[streak] = np.where(g[streak] < 0.6, F("rust", 1), F("rust", 2))
+            c[g < 0.04] = F("rust", 1)
+        elif mat == "swall_wood":                          # odd planks nailed up, gaps between
+            plank = (yy + (gx % 3)) // 6
+            c[:] = np.array([F("wood", 2), F("wood", 3), F("wood", 2), F("wood", 3), F("wood", 4), F("wood", 2)])[(plank * 5 + gy) % 6]
+            c[(yy + (gx % 3)) % 6 == 0] = F("wood", 0)
+            c[((xx * 3 + plank * 7) % 17 == 0) & ((yy % 6) == 3)] = F("stone", 3)     # nails
+            c[g < 0.05] = F("bog", 1)                                                # mould
+        elif mat == "swall_tarp":                          # a tarp pulled over a frame, sagging, stained
+            sag = (np.sin(xx / 5.0 + gx) * 2).astype(int)
+            c[:] = np.where(((yy + sag) // 8) % 2 == 0, F("frost", 2), F("frost", 3))
+            c[(yy + sag) % 8 == 0] = F("frost", 0)
+            c[(g > 0.8) & (yy > 18)] = F("dirt", 1)
+            c[:, 14:16] = F("wood", 1)                                              # a pole holding it
+        else:                                              # plates cut from the ship's hull, rivets, scorch
+            c[:] = np.where(g < 0.3, F("stone", 4), F("stone", 5))
+            c[(xx % 16 == 0) | (yy % 16 == 0)] = F("stone", 2)
+            c[((xx % 16 == 3) | (xx % 16 == 12)) & ((yy % 16 == 3) | (yy % 16 == 12))] = F("stone", 5)
+            if (gx * 7 + gy * 3) % 5 == 0:                # the odd scorch mark, not one on every plate
+                c[(((xx - 14 - gx % 9) ** 2 + (yy - 10 - gy % 7) ** 2) < 50) & (g < 0.7)] = F("ash", 0)
+        if not up:                                         # the top edge catches what light there is
+            c[:2] = F("stone", 5)
+        if not left:
+            c[:, :1] = F("stone", 4)
+        if not down:                                       # its face, in shadow
+            c[-8:] = SHADE[c[-8:]]
+            c[-2:] = F("ash", 0)
+        if b == "sgap":                                    # a hole knocked or rotted through
+            hole = (((xx - 16) / 9.0) ** 2 + ((yy - 14) / 7.0) ** 2 + (g - 0.5) * 0.6) < 1
+            c[hole] = 0
+        return
     if b in ("hwall", "hwin"):                            # house walls: solid blocks, RimWorld-style
         c[:] = np.where(g < 0.15, F("salt", 4), F("salt", 5))         # limewashed top
         c[(xx + yy * 3 + gx) % 23 == 0] = F("salt", 3)
@@ -893,6 +930,31 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
         c[:] = np.where(g < 0.25, F("cobble", 1), F("cobble", 2))
         c[(yy % 16 == 0) | (xx % 16 == 0)] = F("cobble", 1)
         c[(g > 0.985)] = F("dirt", 2)
+    elif b == "sdirt":                                     # packed dirt floor, stains, straw
+        c[:] = np.where(g < 0.5, F("dirt", 1), F("dirt", 2))
+        c[g > 0.96] = F("ochre", 2)
+        if (gx * 5 + gy * 3) % 7 == 0:
+            c[(((xx - 14) ** 2 + (yy - 16) ** 2) < 50) & (g < 0.85)] = F("dirt", 0)
+    elif b == "spallet":                                   # pallets laid on the dirt
+        c[:] = np.where(g < 0.5, F("dirt", 1), F("dirt", 0))
+        boards = (xx % 11) < 8
+        c[boards] = np.where(g[boards] < 0.5, F("wood", 2), F("wood", 1))
+        c[(yy % 16 == 0) & boards] = F("wood", 0)
+    elif b == "debris":                                    # caved-in wall: rubble, splinters, a bent sheet
+        c[:] = np.where(g < 0.5, F("dirt", 1), F("dirt", 0))
+        c[(g > 0.6) & (g < 0.75)] = F("wood", 1)
+        c[(g > 0.88)] = F("stone", 2)
+        c[(abs((xx - yy) - 4) < 2) & (yy > 6)] = F("rust", 1)
+    elif b == "sdoor":                                     # a doorway with a rag hung in it
+        c[:] = np.where(g < 0.5, F("dirt", 1), F("dirt", 2))
+        c[:, :3] = F("wood", 1); c[:, -3:] = F("wood", 1)
+        for k in range(4, TS - 4, 4):
+            ln = 8 + (k * 7 + gx) % 9
+            c[0:ln, k:k + 3] = np.where(g[0:ln, k:k + 3] < 0.5, F("salt", 1), F("salt", 2))
+    elif b == "mud":                                       # trodden mud, puddles, ruts
+        c[:] = np.where(g < 0.55, F("dirt", 0), F("dirt", 1))
+        c[(((xx - 10 - gx % 12) ** 2 + (yy - 12 - gy % 9) ** 2) < 26)] = F("bog", 0)
+        c[g > 0.97] = F("dirt", 2)
     elif b == "street":                                    # estate tarmac: dark, gritty, patched
         c[:] = np.where(g < 0.5, F("stone", 1), F("stone", 2))
         c[g > 0.97] = F("stone", 3)

@@ -55,6 +55,8 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "wall": "Wall", "wwall": "Timber wall", "ruin": "Rubble", "floor": "Concrete floor", "wfloor": "Floorboards", "hwall": "House", "hwin": "House", "hdoor": "Doorway", "hfloor": "Indoors",
          "htile": "Kitchen", "hrug": "Indoors", "hcarpet": "Lounge", "hcarpetb": "Bedroom", "hlino": "Kitchen",
          "hbath": "Bathroom", "hconc": "Garage", "gdoor": "Garage", "street": "Street",
+         "sdirt": "Shack", "spallet": "Shack", "sdoor": "Doorway", "debris": "Caved-in wall", "mud": "Settlement",
+         "shanty": "Settlement",
          "packed": "Packed earth", "scorch": "Scorched ground", "railh": "Railway", "railv": "Railway",
          "mosaic": "Mosaic floor"}
 UNDER = {"road", "trail", "plaza", "house", "bonfire", "bridge"}     # drawn as flowing bands over the land
@@ -64,6 +66,10 @@ BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too de
            "river": "The current's too strong to wade. Find a bridge.", "lake": "The lake's too deep to wade.",
            "bonfire": "The bonfire's too hot to stand in.", "wall": "A solid wall.", "wwall": "A timber wall.",
            "ruin": "A heap of rubble and broken wall.", "hwall": "A house wall.",
+           "swall_iron": "Rusted iron sheeting. It groans when you lean on it.", "swall_wood": "Planks, nailed up badly.",
+           "swall_tarp": "A tarp stretched over poles. Something on the other side moves with it.",
+           "swall_hull": "A plate cut from a ship's hull. Someone scratched marks into it.",
+           "sgap": "A hole in the wall, too small to get through. It's dark on the other side.",
            "hwin": "A window. Grimy glass; shapes move inside, or don't."}
 
 
@@ -221,7 +227,7 @@ class World:
                     c = self.cell(x, y)
                     if c.startswith("f_"):
                         furn.append((x, y, c))
-                    elif c == "hdoor" and (x in (x0, x1) or y in (y0, y1)):
+                    elif c in ("hdoor", "sdoor") and (x in (x0, x1) or y in (y0, y1)):
                         doors.append((x, y, "n" if y == y0 else "s" if y == y1 else "w" if x == x0 else "e"))
             self._hbits[rect] = (furn, doors)
         return self._hbits[rect]
@@ -454,7 +460,8 @@ class Game:
             self.hp = self.maxhp
             self.new_story = bool(self.char)                # main() opens a new story on a title card
             who = f"{self.char['name']}, {self.char['archetype'].lower()}, " if self.char else "You "
-            self.say(who + ("arrive" if not self.char else "arrives") + " in town. M opens the world map (travel with the arrows, M again to zoom in).")
+            self.say(who + ("come" if not self.char else "comes") + " down near a settlement. Smoke, but no voices. "
+                     "(M world map, E search, I bag)")
         self.here = self.w.cell(self.px, self.py)
         self.fx, self.fy = float(self.px), float(self.py)   # smooth position (cells); px, py = the cell you're in
         self.vx = self.vy = 0.0
@@ -797,7 +804,13 @@ class Game:
             b = self.w.chunk(*k)
             vals, counts = np.unique(b, return_counts=True)
             order = [str(v) for _, v in sorted(zip(counts, vals), reverse=True)]
-            mood = "plaza" if "plaza" in order else next((v for v in order if v not in ("road", "house", "bridge")), order[0])
+            if "plaza" in order:
+                mood = "plaza"
+            elif any(v in order for v in ("sdoor", "bonfire", "mud")):
+                mood = "shanty"                          # a settlement
+            else:
+                skip = {"road", "house", "bridge"} | buildings.HOUSE
+                mood = next((v for v in order if v not in skip and not v.startswith(("f_", "p_"))), order[0])
             self._mood = (k, mood)
         return self._mood[1]
 
@@ -1014,7 +1027,7 @@ class Game:
     def thing_name(self, code):
         return items.NAMES.get(code) or structures.PROP_NAMES.get(code[2:], code[2:])
 
-    METAL = {"f_fridge", "f_stove", "f_barrel", "f_sink", "p_barrel", "p_car", "p_truck", "p_hull", "p_pod", "p_panel",
+    METAL = {"f_fridge", "f_stove", "f_barrel", "f_sink", "f_drum", "f_bucket", "f_wbarrel", "p_barrel", "p_car", "p_truck", "p_hull", "p_pod", "p_panel",
              "p_scrap"}
 
     def start_search(self):
@@ -1652,7 +1665,8 @@ class Game:
                 for rect in self.w.houses(zx, zy):
                     for (dx, dy, side) in self.w.house_bits(rect)[1]:
                         X, Y = dx * PX - cxp, dy * PX - cyp + top
-                        if -PX < X < sw and top - PX < Y < top + vh and self.w.was_seen(dx, dy):
+                        if -PX < X < sw and top - PX < Y < top + vh and self.w.was_seen(dx, dy) and \
+                                self.w.cell(dx, dy) == "hdoor":                # shack doorways are just rags
                             S.blit(self.door_sprite(side), (X, Y))
 
     def door_sprite(self, side):
@@ -1754,6 +1768,53 @@ class Game:
             R(light, (5, 5, P_ - 10, P_ - 10)); R(ink, (5, 5, P_ - 10, P_ - 10), 1)
             R(wood, (5, 5, P_ - 10, P_ - 10), 2)
             pygame.draw.line(b, wood, (6, 6), (P_ - 7, P_ - 7), 2); pygame.draw.line(b, wood, (P_ - 7, 6), (6, P_ - 7), 2)
+        elif code in ("f_matt0", "f_matt1"):                    # a mattress on the floor: stained, a grey blanket
+            top_, bot = (3, 0) if code == "f_matt0" else (0, 3)
+            r = (4, top_, P_ - 8, P_ - top_ - bot)
+            R((150, 140, 118), r); R(ink, r, 1)
+            if code == "f_matt0":
+                R((176, 168, 150), (8, 6, P_ - 16, 7))                                  # a flat pillow
+                pygame.draw.ellipse(b, (120, 100, 70), (14, 9, 9, 6))                   # a stain on it
+            else:
+                R((72, 74, 70), (4, 0, P_ - 8, P_ - 9)); R(ink, (4, 0, P_ - 8, P_ - 9), 1)   # blanket, kicked down
+            pygame.draw.ellipse(b, (110, 88, 60), (6 + var % 9, 14 + var % 5, 10, 7))
+        elif code == "f_drum":                                   # oil drum cut into a stove, embers glowing
+            pygame.draw.circle(b, (60, 52, 50), (16, 16), 11); pygame.draw.circle(b, ink, (16, 16), 11, 1)
+            pygame.draw.circle(b, (40, 34, 32), (16, 16), 8)
+            pygame.draw.circle(b, (150, 60, 30), (16, 16), 5); pygame.draw.circle(b, (220, 120, 50), (15, 15), 2)
+            R((50, 44, 40), (22, 2, 4, 8))                                              # a chimney pipe
+        elif code == "f_crtab":                                  # a crate used as a table, a tin and a candle stub
+            R((110, 86, 56), (5, 5, P_ - 10, P_ - 10)); R(ink, (5, 5, P_ - 10, P_ - 10), 1)
+            pygame.draw.line(b, (80, 62, 40), (6, 6), (P_ - 7, P_ - 7), 2)
+            R((150, 150, 156), (9, 9, 6, 7))
+            pygame.draw.circle(b, (210, 200, 160), (21, 19), 2); pygame.draw.circle(b, (250, 200, 110), (21, 18), 1)
+        elif code == "f_stool":                                  # a stool made of a cable drum
+            pygame.draw.circle(b, (96, 74, 50), (16, 16), 7); pygame.draw.circle(b, ink, (16, 16), 7, 1)
+            pygame.draw.circle(b, (70, 54, 36), (16, 16), 3)
+        elif code == "f_sshelf":                                 # planks on bricks, jars and tins
+            R((92, 72, 48), (2, 4, P_ - 4, 10)); R(ink, (2, 4, P_ - 4, 10), 1)
+            for x, col in ((5, (120, 130, 110)), (11, (150, 140, 120)), (17, (100, 70, 50)), (23, (130, 130, 136))):
+                R(col, (x, 6, 4, 6))
+        elif code == "f_bucket":
+            pygame.draw.circle(b, (110, 110, 112), (16, 16), 7); pygame.draw.circle(b, ink, (16, 16), 7, 1)
+            pygame.draw.circle(b, (40, 52, 52), (16, 16), 5)
+            pygame.draw.arc(b, (80, 80, 84), (8, 6, 16, 16), 0.3, 2.8, 1)
+        elif code == "f_rags":                                   # a heap of rags and old clothes
+            for k, col in enumerate(((90, 80, 70), (70, 76, 80), (110, 90, 70), (60, 60, 56))):
+                pygame.draw.ellipse(b, col, (5 + (k * 7 + var) % 10, 8 + (k * 5) % 9, 14, 10))
+        elif code == "f_wbarrel":                                # a plastic water barrel, faded
+            pygame.draw.circle(b, (60, 84, 96), (16, 16), 10); pygame.draw.circle(b, ink, (16, 16), 10, 1)
+            pygame.draw.circle(b, (40, 60, 70), (16, 16), 6, 1); pygame.draw.circle(b, (30, 30, 30), (19, 13), 2)
+        elif code == "f_shrine":                                 # what they turned to: candles, a twig effigy, the eye
+            R((70, 62, 54), (3, 8, P_ - 6, P_ - 12)); R(ink, (3, 8, P_ - 6, P_ - 12), 1)
+            R((120, 110, 96), (4, 9, P_ - 8, 3))                                        # a cloth over it
+            pygame.draw.circle(b, (150, 30, 34), (16, 18), 5, 1)                        # the eye, daubed in red
+            pygame.draw.circle(b, (150, 30, 34), (16, 18), 1)
+            for x in (6, 26):                                                            # candle stubs
+                R((220, 210, 180), (x - 1, 14, 3, 6)); pygame.draw.circle(b, (255, 210, 120), (x, 13), 1)
+            pygame.draw.line(b, (90, 70, 46), (16, 3), (16, 11), 1)                      # a twig effigy, bound with wire
+            pygame.draw.line(b, (90, 70, 46), (12, 5), (20, 5), 1)
+            pygame.draw.line(b, (140, 140, 150), (14, 7), (18, 7), 1)
         elif code in ("f_sofa0", "f_sofa1"):                    # 70s sofa, back to the wall: brown cord
             fab = (150, 92, 50) if var % 2 else (120, 80, 60)
             hi = tuple(min(255, int(c * 1.18)) for c in fab)
@@ -1835,7 +1896,7 @@ class Game:
                                          if (x + dx, y + dy) in tables), (0, 1))
                         X, Y = x * PX - cxp, y * PX - cyp + top
                         S.blit(self.furn_sprite(c, var + x * 3 + y, face), (X, Y))
-                        if lit and c in ("f_lamp", "f_end") and (x, y) in self.vis:
+                        if lit and c in ("f_lamp", "f_end", "f_drum", "f_shrine") and (x, y) in self.vis:
                             self.lamps.append((X + PX // 2, Y + PX // 2 - 2, c == "f_lamp"))
 
     def fog_tiles(self):
@@ -2003,7 +2064,10 @@ class Game:
                      "hfloor": (132, 96, 62), "hcarpet": (176, 84, 42), "hcarpetb": (122, 142, 64), "hlino": (204, 190, 140),
                      "hbath": (170, 204, 214), "hconc": (112, 112, 118), "htile": (150, 150, 150), "hrug": (150, 50, 50),
                      "wall": (150, 150, 150), "wwall": (130, 96, 60), "ruin": (110, 104, 96), "floor": (96, 96, 100),
-                     "wfloor": (110, 84, 56)}
+                     "wfloor": (110, 84, 56), "swall_iron": (120, 110, 104), "swall_wood": (104, 80, 56),
+                     "swall_tarp": (80, 92, 110), "swall_hull": (140, 140, 146), "sgap": (60, 56, 52),
+                     "sdoor": (120, 90, 60), "debris": (90, 76, 60), "sdirt": (70, 56, 40), "spallet": (96, 74, 50),
+                     "mud": (58, 50, 40)}
             if c in fixed:
                 col = fixed[c]
             elif c.startswith("f_"):

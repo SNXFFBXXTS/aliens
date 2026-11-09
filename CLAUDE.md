@@ -46,21 +46,15 @@ still uses cells). Body is a small box (BODY); walls stop one axis so you slide 
 whether you move or not. Creatures glide between squares when drawn (Game.mob_pos). `act()` is only used by --shot.
 
 ## Buildings and size
-- Towns are 70s Essex estates (user asked for 1970s Essex house designs, not square boxes, NO ROOFS so you see in):
-  proto.gen_cells lays out straight "street" (tarmac) roads from the square plus closes (cul-de-sacs) with turning heads,
-  reach 34 cells so a town spreads over the 3x3 zones round its square. buildings.town puts houses facing the streets
-  with front gardens; each candidate has its own rng ([base, street, side, step]) so fits never ripple.
-- buildings.py PLANS (rooms as shared-wall rects + doors D/B/+/G, front = south): L-plan bungalow, T-plan chalet
-  bungalow, link-detached house + garage, U courtyard bungalow, semi-detached pair (mirrored, garages at the ends),
-  staggered terrace of 3. oriented() turns/mirrors so the front door faces the street; houses are slid wholly inside
-  one zone. stamp(): windows on outside walls of lived-in rooms, then _furnish per room (b bed/l lounge/k kitchen/
-  d dining/w bathroom/g garage/h hall) via _House.put (door can always reach all free floor).
-  Floors: hcarpet (orange lounge), hcarpetb (avocado bedroom), hlino (check), hbath, hconc (garage), hfloor (hall);
-  gdoor = open up-and-over garage door. Furniture f_*: bed, sofa, telly, coffee table, armchair, lamp, plant, cooker,
-  sink, fridge, cupboard, dining table + chairs, wardrobe, dresser, avocado bath + toilet, workbench, boxes, oil drum.
-- Houses have no roofs and house walls don't block sight (immersion.BLOCK_SIGHT). Game.draw_doors marks front doors.
-  World.houses() finds houses by their joined walls; World.house_bits() caches furniture + outside doors.
-  Creatures don't spawn in zones with houses, can't walk through walls/furniture (mobs.NO_WALK). Old saves keep huts.
+- Milestone 1.2 (DIRECTION.md): towns are now SHANTY SETTLEMENTS (the 70s estates are dropped; old saves still draw
+  their h* codes). proto.gen_cells: ragged "mud" clearing round a bonfire, 4-6 wandering mud paths out (same in every
+  zone, so they join), buildings.settlement() scatters shacks (own rng per shack, wholly inside one zone) facing the fire,
+  each door gets a short mud spur. buildings.shack(): walls per side from iron/wood/tarp/hull (patched 22%), sgap holes,
+  sometimes a lean-to (tarp/wood) and a caved-in stretch ("debris", walkable); floors sdirt/spallet. _furnish: floor
+  mattress f_matt0/1, oil-drum stove f_drum (glows), crate table + stool, scrap shelf, bucket, rags, water barrel,
+  crate, sometimes a shrine (candles, twig effigy, the eye daubed in red). Zone mood "shanty" (immersion text).
+- Milestone 1.1: weird.sicken() drains the whole palette at load (blood/lava/eye stay vivid), darker days, night
+  near-black with a carried light (darkness carve + warm glow), drifting fog (Game.draw_fog), screen vignette.
 - No face-like props (user): serpent heads, stelae, skull racks and idols were removed from scatter and layouts.
 - Character size slider: Z (or [ ]) -> Game.size (0.3..1.2, default 0.55), saved in ROOT/settings.json. Hero and
   creatures scale from their feet; collision body scales a bit too.

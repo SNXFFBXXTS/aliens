@@ -9,7 +9,8 @@ import weird
 
 T = 16
 WATER = {"shallow", "lake", "river"}
-NO_WALK = {"deep", "ocean", "mountain", "peak", "house", "lava", "wall", "wwall", "ruin", "hwall", "hwin"}
+NO_WALK = {"deep", "ocean", "mountain", "peak", "house", "lava", "wall", "wwall", "ruin", "hwall", "hwin",
+           "swall_iron", "swall_wood", "swall_tarp", "swall_hull", "sgap"}
 try:
     import buildings
     NO_WALK |= buildings.FURN_BLOCK
@@ -165,7 +166,7 @@ def spawn(best, cells, cx, cy, cs, tier, seed):
     out = []
     # most zones are quiet; further out they get busier
     want = r.choice([[0, 0, 0, 0, 1, 1, 2], [0, 0, 1, 1, 2, 2, 3], [0, 1, 1, 2, 2, 3, 4]][min(tier, 2)])
-    if np.isin(cells, ["plaza", "house", "hwall", "hdoor"]).any():
+    if np.isin(cells, ["plaza", "house", "hwall", "hdoor", "sdoor", "bonfire"]).any():
         want = 0                                   # nothing nasty wanders round town (or its houses)
     for k in range(int(want) * 6):
         if len(out) >= want:

@@ -108,6 +108,11 @@ D = {
     "trail": (["A narrow trail, worn by feet or something with more of them.", "A path winds off between the growth."],
               ["Your steps go quiet on the packed earth."], ["Dust and crushed stems."]),
     "road": (["A worn road, rutted by wheels.", "Old stones mark the way."], ["Your footsteps sound loud on the packed earth."], ["Dust and dung."]),
+    "shanty": (["Shacks of rusted iron lean on each other like drunks.", "Tarps snap in a wind you can't feel.",
+                "Every door here was left open.", "Someone kept the fire going. You can't see who."],
+               ["Something drips inside one of the shacks.", "A radio somewhere is playing to nobody.",
+                "Tin rattles. Then stops, as if listening.", "A mattress creaks, in an empty shack."],
+               ["Damp ash and old fat.", "Wet rust, and something sweeter underneath."]),
     "plaza": (["Bungalows and semis line quiet closes round the square.", "Net curtains, pebble-dash, a garage door left up."],
               ["A gate creaks somewhere down the close.", "Someone is hammering something in a garage."],
               ["Woodsmoke and cut grass.", "Damp carpet and old cooking."]),
@@ -132,7 +137,7 @@ RATE = 22050
 SND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 AMB_OF = {"forest": "forest", "jungle": "jungle", "swamp": "water", "lake": "water", "river": "water", "shallow": "water",
           "beach": "water", "fungal": "fungal", "crystal": "crystal", "ash": "lava", "crust": "lava", "lava": "lava",
-          "plaza": "town", "bonfire": "town", "trail": "wind", "road": "wind", "grass": "wind", "meadow": "forest", "savanna": "wind", "desert": "wind",
+          "plaza": "town", "bonfire": "town", "shanty": "town", "trail": "wind", "road": "wind", "grass": "wind", "meadow": "forest", "savanna": "wind", "desert": "wind",
           "salt": "wind", "badlands": "wind", "hills": "wind", "tundra": "cold", "taiga": "cold", "icesheet": "cold",
           "drift": "cold", "seaice": "cold"}
 
