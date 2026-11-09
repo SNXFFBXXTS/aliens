@@ -799,7 +799,7 @@ def ground(p, x, y, fam, r):
 
 
 BUILT = {"wall", "wwall", "ruin", "floor", "wfloor", "packed", "scorch", "railh", "railv", "mosaic",
-         "hwall", "hwin", "hdoor", "hfloor"}
+         "hwall", "hwin", "hdoor", "hfloor", "htile", "hrug"}
 
 
 WALLS = ("wall", "wwall", "ruin", "hwall", "hwin")
@@ -813,21 +813,29 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
     g = np.random.default_rng(int(r[0] * 1e9) & 0xFFFFFFFF).random((TS, TS))
     yy, xx = np.mgrid[0:TS, 0:TS]
     gx, gy = int(r[1] * 977), int(r[2] * 977)
-    if b in ("wall", "ruin", "wwall", "hwall", "hwin"):
+    if b in ("hwall", "hwin"):                            # house walls: solid blocks, RimWorld-style
+        c[:] = np.where(g < 0.15, F("salt", 4), F("salt", 5))         # limewashed top
+        c[(xx + yy * 3 + gx) % 23 == 0] = F("salt", 3)
+        if not up:
+            c[:2] = F("salt", 6)
+        if not left:
+            c[:, :2] = F("salt", 6)
+        if not right:
+            c[:, -2:] = F("salt", 3)
+        if not down:                                       # the face of the wall, in shade
+            c[-9:] = F("wood", 2)
+            c[-9:][(xx[-9:] % 8) == 0] = F("wood", 1)
+            c[-2:] = F("wood", 0)
+        if b == "hwin":                                    # a window: glass set in the wall, a frame round it
+            c[9:23, 6:26] = F("wood", 1)
+            c[11:21, 8:24] = F("sea", 2)
+            c[11:21, 15:17] = F("wood", 1)
+            c[11:14, 9:13] = F("sea", 5)
+        return
+    if b in ("wall", "ruin", "wwall"):
         thin = (up or down) and not (left or right)      # a wall running up the screen is seen edge-on: narrow
         t = np.empty((TS, TS), np.uint8)
-        if b in ("hwall", "hwin"):                        # lived-in house: limewash between timber posts
-            t[:] = np.where(g < 0.12, F("salt", 3), F("salt", 4))
-            t[(xx % 16 == 0) | (xx % 16 == 1)] = F("wood", 2)
-            t[(yy == 14) | (yy == 15)] = F("wood", 2)
-            lit, mid, dim = F("salt", 6), F("salt", 5), F("wood", 1)
-            if b == "hwin":                                # a window: dark glass with a warm glint, in a frame
-                t[8:24, 7:25] = F("wood", 1)
-                t[10:22, 9:23] = F("sea", 1)
-                t[10:22, 15:17] = F("wood", 1)
-                t[15:17, 9:23] = F("wood", 1)
-                t[11:13, 10:13] = F("ochre", 6)
-        elif b == "wwall":
+        if b == "wwall":
             t[:] = np.where((xx // 5) % 2 == 0, F("wood", 3), F("wood", 4))
             t[xx % 5 == 0] = F("wood", 1)
             lit, mid, dim = F("wood", 5), F("wood", 4), F("wood", 1)
@@ -866,6 +874,14 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
         c[:] = np.where(g < 0.25, F("cobble", 1), F("cobble", 2))
         c[(yy % 16 == 0) | (xx % 16 == 0)] = F("cobble", 1)
         c[(g > 0.985)] = F("dirt", 2)
+    elif b == "htile":                                     # kitchen: square stone tiles
+        c[:] = np.where(((xx // 16) + (yy // 16) + gx) % 2 == 0, F("stone", 4), F("stone", 3))
+        c[(xx % 16 == 0) | (yy % 16 == 0)] = F("stone", 2)
+        c[g < 0.02] = F("stone", 2)
+    elif b == "hrug":                                      # a woven rug: border, field and a simple pattern
+        c[:] = F("blood", 3)
+        c[((xx + yy) % 8 == 0) | ((xx - yy) % 8 == 0)] = F("ochre", 4)
+        c[(xx % 32 < 2) | (yy % 32 < 2) | (xx % 32 > 29) | (yy % 32 > 29)] = F("ochre", 3)
     elif b in ("hfloor", "hdoor"):                      # warm boards, a rug's edge here and there
         plank = xx // 8
         tone = (plank * 5 + gx) % 3

@@ -9,7 +9,12 @@ import weird
 
 T = 16
 WATER = {"shallow", "lake", "river"}
-NO_WALK = {"deep", "ocean", "mountain", "peak", "house", "lava"}
+NO_WALK = {"deep", "ocean", "mountain", "peak", "house", "lava", "wall", "wwall", "ruin", "hwall", "hwin"}
+try:
+    import buildings
+    NO_WALK |= buildings.FURN_BLOCK
+except ImportError:
+    pass
 
 # name parts: per biome a few adjectives, per body plan some nouns
 ADJ = {

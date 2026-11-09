@@ -27,6 +27,7 @@ import weird                                           # noqa: E402
 import mobs                                            # noqa: E402
 import immersion as im                                 # noqa: E402
 import structures                                      # noqa: E402
+import buildings                                       # noqa: E402
 from weird_proto import world8                         # noqa: E402
 from art import P, B, T, Painter                       # noqa: E402
 
@@ -51,6 +52,7 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "fungal": "Fungal forest", "crystal": "Crystal fields", "lake": "Lake", "river": "River", "road": "Road",
          "bridge": "Bridge", "house": "House", "plaza": "Town", "trail": "Trail", "bonfire": "Town",
          "wall": "Wall", "wwall": "Timber wall", "ruin": "Rubble", "floor": "Concrete floor", "wfloor": "Floorboards", "hwall": "House", "hwin": "House", "hdoor": "Doorway", "hfloor": "Indoors",
+         "htile": "Kitchen", "hrug": "Indoors",
          "packed": "Packed earth", "scorch": "Scorched ground", "railh": "Railway", "railv": "Railway",
          "mosaic": "Mosaic floor"}
 UNDER = {"road", "trail", "plaza", "house", "bonfire", "bridge"}     # drawn as flowing bands over the land
@@ -185,6 +187,23 @@ class World:
             self._houses[k] = buildings.find(codes, cx * CS, cy * CS)
         return self._houses[k]
 
+    def house_bits(self, rect):
+        """(furniture [(x, y, code)], outer doors [(x, y, side)]) of a house, cached"""
+        if not hasattr(self, "_hbits"):
+            self._hbits = {}
+        if rect not in self._hbits:
+            x0, y0, x1, y1 = rect
+            furn, doors = [], []
+            for y in range(y0, y1 + 1):
+                for x in range(x0, x1 + 1):
+                    c = self.cell(x, y)
+                    if c.startswith("f_"):
+                        furn.append((x, y, c))
+                    elif c == "hdoor" and (x in (x0, x1) or y in (y0, y1)):
+                        doors.append((x, y, "n" if y == y0 else "s" if y == y1 else "w" if x == x0 else "e"))
+            self._hbits[rect] = (furn, doors)
+        return self._hbits[rect]
+
     def cell(self, gx, gy):
         b = self.chunk(gx // CS, gy // CS)
         return str(b[gy % CS, gx % CS])
@@ -276,10 +295,10 @@ class World:
         for y in range(B.shape[0]):
             for x in range(B.shape[1]):
                 c = B[y, x]
-                if c in UNDER or c.startswith("p_") or c in weird.BUILT:
+                if c in UNDER or c.startswith("p_") or c.startswith("f_") or c in weird.BUILT:
                     win = B[max(0, y - 2):y + 3, max(0, x - 2):x + 3].ravel()
                     want = [w for w in win if (w in weird.WATER) == (c == "bridge") and w not in UNDER
-                            and not w.startswith("p_") and w not in weird.BUILT]
+                            and not w.startswith("p_") and not w.startswith("f_") and w not in weird.BUILT]
                     G[y, x] = max(set(want), key=want.count) if want else ("river" if c == "bridge" else "grass")
         zseed = (cx * 7919 + cy * 104729 + self.seed) & 0xFFFFFFFF
         weird.ground_pass(p, G, M, CS, zseed, cx * CS * weird.TS, cy * CS * weird.TS)
@@ -288,6 +307,10 @@ class World:
         for y in range(CS):
             for x in range(CS):
                 c = b[y, x]
+                if c.startswith("f_"):             # furniture (drawn live by the game) stands on the room's floor
+                    nbr = [B[y + M + oy, x + M + ox] for ox, oy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+                    fl = [n for n in nbr if n in buildings.FLOORS]
+                    c = max(set(fl), key=fl.count) if fl else "hfloor"
                 if c in weird.WALLS:               # walls join up with the walls next to them
                     W_ = weird.WALLS
                     weird.built(p, x, y, c, R[y, x], nb=(B[y + M - 1, x + M] in W_, B[y + M + 1, x + M] in W_,
@@ -812,6 +835,8 @@ class Game:
             return BLOCKED[c]
         if c in structures.BLOCKING:
             return f"A {structures.PROP_NAMES.get(c[2:], c[2:])} is in the way."
+        if c in buildings.FURN_BLOCK:
+            return f"A {buildings.FURN[c][0]} is in the way."
         return None
 
     def box_cells(self, fx, fy):
@@ -1108,6 +1133,7 @@ class Game:
                 srf.set_palette(pal)
                 S.blit(srf, (cx * CS * PX - cxp, cy * CS * PX - cyp + top))
         fires = self.draw_live(S, top, t, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
+        self.draw_furniture(S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y, t)
         if len(self.mob_pos) > 400:
             self.mob_pos.clear()
         for m in self.w.mobs.values():
@@ -1138,6 +1164,9 @@ class Game:
         for (fx, fy) in fires:                           # firelight pushes back the dark
             g = glow[int(t * 7 + fx) % len(glow)]
             S.blit(g, (fx - g.get_width() // 2, fy - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
+        for (lx_, ly_, big) in getattr(self, "lamps", []):          # lamps light the room a little
+            g = self.lamp_glow(big)
+            S.blit(g, (lx_ - g.get_width() // 2, ly_ - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
         hx, hy = int(self.fx * PX) - cxp, int(self.fy * PX) - cyp + top
         z_ = self.size
         feet = hy + PX - 4                                   # your feet stay at the bottom of your square
@@ -1250,8 +1279,11 @@ class Game:
         for zy in range(c0y, c1y + 1):
             for zx in range(c0x, c1x + 1):
                 for (x0, y0, x1, y1) in self.w.houses(zx, zy):
+                    cx_, cy_ = self.fx + 0.5, self.fy + 0.5         # how far you are from the house
+                    d = max(x0 - cx_, cx_ - (x1 + 1), y0 - cy_, cy_ - (y1 + 1), 0.0)
                     if x0 <= self.px <= x1 and y0 <= self.py <= y1:
-                        continue
+                        d = -1
+                    fade = 0 if d < 0 else int(255 * min(1.0, max(0.0, (d - 0.3) / 2.0)))
                     if not any(self.w.was_seen(x, y) for x in (x0, x1) for y in (y0, y1)) and \
                             not self.w.was_seen((x0 + x1) // 2, (y0 + y1) // 2):
                         continue                                   # never seen: stays in the dark
@@ -1259,7 +1291,159 @@ class Game:
                     w, h = (x1 - x0 + 1) * PX, (y1 - y0 + 1) * PX
                     if X > sw or Y > top + vh or X + w < 0 or Y + h < top:
                         continue
-                    S.blit(self.roof(w, h, (x0 * 31 + y0 * 17) % 997), (X - 4, Y - 6))
+                    if fade > 0:                                   # close by, it goes see-through so you see in
+                        rf = self.roof(w, h, (x0 * 31 + y0 * 17) % 997)
+                        if fade < 255:
+                            rf = rf.copy()
+                            rf.set_alpha(fade)
+                        S.blit(rf, (X - 4, Y - 6))
+                    for (dx, dy, side) in self.w.house_bits((x0, y0, x1, y1))[1]:
+                        S.blit(self.door_sprite(side), (dx * PX - cxp, dy * PX - cyp + top))
+
+    def door_sprite(self, side):
+        """a front door you can see from the street, drawn over the roof's edge"""
+        key = ("door", side)
+        if key not in self.mob_img:
+            s = pygame.Surface((PX, PX), pygame.SRCALPHA)
+            pygame.draw.rect(s, (40, 30, 24), (4, 2, PX - 8, PX - 3))            # frame
+            pygame.draw.rect(s, (128, 86, 50), (7, 5, PX - 14, PX - 9))          # door
+            for x in (11, 16, 21):
+                pygame.draw.line(s, (96, 62, 36), (x, 6), (x, PX - 6))
+            pygame.draw.circle(s, (220, 190, 110), (PX - 11, PX // 2 + 2), 2)   # handle
+            pygame.draw.rect(s, (150, 140, 128), (3, PX - 4, PX - 6, 3))          # step
+            rot = {"s": 0, "n": 180, "w": -90, "e": 90}[side]
+            self.mob_img[key] = pygame.transform.rotate(s, rot)
+        return self.mob_img[key]
+
+    BLANKETS = [(70, 100, 150), (150, 64, 60), (80, 118, 76), (150, 120, 60), (110, 80, 130)]
+    FABRIC = [(120, 70, 60), (70, 90, 110), (110, 100, 70)]
+
+    def furn_sprite(self, code, var, face=(0, 0)):
+        """furniture, top-down and clean (RimWorld-ish): flat colours, a dark outline, a soft shadow"""
+        key = ("furn", code, var, face)
+        if key in self.mob_img:
+            return self.mob_img[key]
+        P_ = PX
+        wood, dark, light, ink = (126, 90, 58), (84, 58, 38), (162, 122, 82), (30, 24, 22)
+        b = pygame.Surface((P_, P_), pygame.SRCALPHA)
+        R = lambda col, r, w=0: pygame.draw.rect(b, col, r, w)
+        if code == "f_bed0":                                     # head end: pillow, turned-down sheet
+            R(wood, (2, 2, P_ - 4, P_ - 2)); R(ink, (2, 2, P_ - 4, P_ - 2), 1)
+            R(dark, (2, 2, P_ - 4, 4))
+            R((222, 218, 206), (5, 7, P_ - 10, P_ - 7))
+            R((242, 240, 232), (7, 8, P_ - 14, 8)); R((190, 186, 176), (7, 8, P_ - 14, 8), 1)
+            R(self.BLANKETS[var % 5], (5, 21, P_ - 10, P_ - 21))
+        elif code == "f_bed1":                                   # foot end: blanket, footboard
+            R(wood, (2, 0, P_ - 4, P_ - 2)); R(ink, (2, 0, P_ - 4, P_ - 2), 1)
+            bl = self.BLANKETS[var % 5]
+            R(bl, (5, 0, P_ - 10, P_ - 8))
+            R(tuple(int(c * 0.8) for c in bl), (5, P_ - 14, P_ - 10, 2))
+            R(dark, (2, P_ - 6, P_ - 4, 4))
+        elif code in ("f_tab0", "f_tab1"):                       # a two-seat dining table
+            r = (4, 6, P_ - 4, P_ - 12) if code == "f_tab0" else (0, 6, P_ - 4, P_ - 12)
+            R(wood, r); R(light, (r[0], r[1], r[2], 3)); R(ink, r, 1)
+            if code == "f_tab0":
+                pygame.draw.circle(b, (228, 226, 218), (P_ // 2 + 2, P_ // 2), 5)
+                pygame.draw.circle(b, (190, 120, 70), (P_ // 2 + 2, P_ // 2), 2)
+            else:
+                R((200, 200, 210), (P_ // 2 - 5, P_ // 2 - 3, 4, 6))
+                pygame.draw.circle(b, (240, 220, 150), (P_ // 2 + 3, P_ // 2 - 1), 2)
+        elif code == "f_chair":
+            R(wood, (9, 9, 14, 14)); R(ink, (9, 9, 14, 14), 1)
+            fx_, fy_ = face                                      # back on the side away from the table
+            if fx_ > 0: R(dark, (7, 8, 4, 16))
+            elif fx_ < 0: R(dark, (P_ - 11, 8, 4, 16))
+            elif fy_ > 0: R(dark, (8, 7, 16, 4))
+            else: R(dark, (8, P_ - 11, 16, 4))
+        elif code == "f_arm":
+            fab = self.FABRIC[var % 3]
+            R(fab, (5, 6, P_ - 10, P_ - 9)); R(ink, (5, 6, P_ - 10, P_ - 9), 1)
+            R(tuple(int(c * 0.7) for c in fab), (5, 6, P_ - 10, 7))
+            R(tuple(int(c * 0.8) for c in fab), (5, 6, 5, P_ - 9)); R(tuple(int(c * 0.8) for c in fab), (P_ - 10, 6, 5, P_ - 9))
+            R(tuple(min(255, int(c * 1.15)) for c in fab), (11, 14, P_ - 22, P_ - 19))
+        elif code == "f_end":
+            R(wood, (8, 8, 16, 16)); R(ink, (8, 8, 16, 16), 1)
+            pygame.draw.circle(b, (236, 226, 190), (16, 15), 4)
+            pygame.draw.circle(b, (255, 214, 120), (16, 15), 2)
+        elif code == "f_dress":
+            R(wood, (3, 5, P_ - 6, P_ - 10)); R(ink, (3, 5, P_ - 6, P_ - 10), 1)
+            for y in (11, 17, 23):
+                pygame.draw.line(b, dark, (5, y), (P_ - 6, y))
+                pygame.draw.circle(b, (210, 180, 110), (P_ // 2, y - 3), 1)
+        elif code == "f_lamp":
+            pygame.draw.circle(b, (60, 52, 46), (16, 18), 5)
+            pygame.draw.circle(b, (242, 222, 160), (16, 14), 8); pygame.draw.circle(b, ink, (16, 14), 8, 1)
+            pygame.draw.circle(b, (255, 245, 210), (16, 14), 3)
+        elif code == "f_stove":
+            R((72, 74, 80), (3, 4, P_ - 6, P_ - 8)); R(ink, (3, 4, P_ - 6, P_ - 8), 1)
+            for cx_, cy_ in ((10, 11), (22, 11), (10, 22), (22, 22)):
+                pygame.draw.circle(b, (40, 40, 44), (cx_, cy_), 4)
+                pygame.draw.circle(b, (150, 60, 40) if (cx_ + cy_ + var) % 3 == 0 else (60, 60, 64), (cx_, cy_), 2)
+        elif code == "f_shelf":
+            R(wood, (2, 3, P_ - 4, 12)); R(ink, (2, 3, P_ - 4, 12), 1)
+            cols = [(170, 60, 50), (60, 90, 140), (200, 180, 120), (80, 120, 70), (150, 110, 160)]
+            x = 4
+            while x < P_ - 6:
+                wd_ = 2 + (x * 7 + var) % 3
+                R(cols[(x + var) % 5], (x, 5, wd_, 8))
+                x += wd_ + 1
+        elif code == "f_plant":
+            for a in range(7):
+                ang = a / 7 * 6.283 + var
+                pygame.draw.ellipse(b, (70, 130, 64) if a % 2 else (90, 150, 80),
+                                    (16 + math.cos(ang) * 7 - 5, 15 + math.sin(ang) * 7 - 4, 10, 8))
+            pygame.draw.circle(b, (170, 92, 60), (16, 17), 6); pygame.draw.circle(b, ink, (16, 17), 6, 1)
+            pygame.draw.circle(b, (64, 46, 34), (16, 17), 4)
+            pygame.draw.circle(b, (100, 170, 90), (16, 16), 3)
+        elif code == "f_crate":
+            R(light, (5, 5, P_ - 10, P_ - 10)); R(ink, (5, 5, P_ - 10, P_ - 10), 1)
+            R(wood, (5, 5, P_ - 10, P_ - 10), 2)
+            pygame.draw.line(b, wood, (6, 6), (P_ - 7, P_ - 7), 2); pygame.draw.line(b, wood, (P_ - 7, 6), (6, P_ - 7), 2)
+        elif code == "f_sink":
+            R((214, 214, 222), (4, 6, P_ - 8, P_ - 12)); R(ink, (4, 6, P_ - 8, P_ - 12), 1)
+            pygame.draw.ellipse(b, (150, 160, 172), (8, 10, P_ - 16, P_ - 20))
+            R((120, 120, 128), (P_ // 2 - 1, 6, 3, 6))
+        mask = pygame.mask.from_surface(b)
+        out = pygame.Surface((P_, P_), pygame.SRCALPHA)
+        out.blit(mask.to_surface(setcolor=(0, 0, 0, 80), unsetcolor=(0, 0, 0, 0)), (2, 3))   # soft shadow
+        out.blit(b, (0, 0))
+        self.mob_img[key] = out
+        return out
+
+    def draw_furniture(self, S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y, t):
+        """the furniture in every house in view (a roof drawn later hides it from outside)"""
+        self.lamps = []
+        for zy in range(c0y, c1y + 1):
+            for zx in range(c0x, c1x + 1):
+                for rect in self.w.houses(zx, zy):
+                    x0, y0, x1, y1 = rect
+                    if x0 * PX - cxp > sw or (x1 + 1) * PX - cxp < 0 or y0 * PX - cyp > vh or (y1 + 1) * PX - cyp < 0:
+                        continue
+                    var = (x0 * 7 + y0 * 13) % 97
+                    cx_, cy_ = self.fx + 0.5, self.fy + 0.5
+                    lit = max(x0 - cx_, cx_ - (x1 + 1), y0 - cy_, cy_ - (y1 + 1)) < 1.0   # only light a room you can see into
+                    furn = self.w.house_bits(rect)[0]
+                    tables = {(x, y) for x, y, c in furn if c in ("f_tab0", "f_tab1")}
+                    for (x, y, c) in furn:
+                        face = (0, 0)
+                        if c == "f_chair":
+                            face = next(((dx, dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                                         if (x + dx, y + dy) in tables), (0, 1))
+                        X, Y = x * PX - cxp, y * PX - cyp + top
+                        S.blit(self.furn_sprite(c, var + x * 3 + y, face), (X, Y))
+                        if lit and c in ("f_lamp", "f_end") and (x, y) in self.vis:
+                            self.lamps.append((X + PX // 2, Y + PX // 2 - 2, c == "f_lamp"))
+
+    def lamp_glow(self, big):
+        key = ("lampglow", big)
+        if key not in self.mob_img:
+            r = int(PX * (2.6 if big else 1.4))
+            yy, xx = np.mgrid[-r:r, -r:r]
+            f = np.clip(1 - np.sqrt(xx * xx + yy * yy) / r, 0, 1) ** 2      # soft fall-off, no hard edge
+            peak = 46 if big else 30
+            a = np.dstack([f * peak, f * peak * 0.78, f * peak * 0.42]).astype(np.uint8)
+            self.mob_img[key] = pygame.surfarray.make_surface(a.swapaxes(0, 1))
+        return self.mob_img[key]
 
     def roof(self, w, h, seed):
         """a hipped roof of tiles or thatch with its shadow, w x h pixels (plus overhang)"""

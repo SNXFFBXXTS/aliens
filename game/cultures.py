@@ -451,13 +451,13 @@ st.PROP_NAMES["solid"] = "monument"
 L = st.layout
 L("aztec_temple", "a stepped temple in the trees", {"forest", "jungle", "swamp"},
   ["s   xxx   s", "    xxx    ", "e   xYx   e", "           ", "p   ___   n", "  e _F_ e  "],
-  {"Y": "steppyr", "x": "solid", "s": "serpent", "e": "stela", "p": "pipes", "n": "neon", "F": "fire"},
+  {"Y": "steppyr", "x": "solid", "s": "stone", "e": "stone", "p": "pipes", "n": "neon", "F": "fire"},
   "A stepped pyramid rises out of the canopy, glyphs worn smooth. Someone bolted a dish to the shrine at the top and ran cables down its steps.")
 L("aztec_court", "an old ball court", {"forest", "jungle", "swamp"},
-  ["##########", "#  R   R #", "#   __   #", "#  K  c  #", "####  ####"], {"R": "ballring", "K": "skullrack", "c": "cables"},
+  ["##########", "#  R   R #", "#   __   #", "#  K  c  #", "####  ####"], {"R": "ballring", "K": "rack", "c": "cables"},
   "Two long walls and a stone ring high up. A rack of skulls watches the empty court. Something still plays here at night.")
 L("aztec_plaza", "a plaza of carved heads", {"forest", "jungle"},
-  ["s e s e s", "         ", "e  _A_  e", "         ", "s n s n s"], {"s": "serpent", "e": "stela", "A": "altar", "n": "neon"},
+  ["s e s e s", "         ", "e  _A_  e", "         ", "s n s n s"], {"s": "stone", "e": "stone", "A": "altar", "n": "neon"},
   "Serpent heads ring a plaza, jaws open. A neon sign flickers over the altar, selling something to nobody.")
 L("egypt_pyramid", "a great pyramid", {"desert", "salt", "badlands", "savanna"},
   ["  xxxxx  ", "  xxxxx  ", "  xxYxx  ", "         ", "o       o", " S     Z "],
@@ -489,7 +489,7 @@ L("silos", "a silo farm", {"grass", "meadow", "savanna"},
   ["ffffffffffff", "f  O    O  f", "f    B     f", "f  O   P   f", "ffffff  ffff"], {"O": "silo", "B": "billboard", "P": "pylon"},
   "Grain silos gone to rust, a billboard promising a better harvest. The fields round it grew nothing for years.")
 L("shrine_tech", "a wired shrine", {"fungal", "crystal", "ash", "jungle"},
-  [" c   I   c ", "  K _A_ K  ", " n   M   n "], {"I": "idol", "A": "altar", "K": "cables", "n": "neon", "M": "mech", "c": "candle"},
+  [" c   I   c ", "  K _A_ K  ", " n   M   n "], {"I": "obelisk", "A": "altar", "K": "cables", "n": "neon", "M": "mech", "c": "candle"},
   "An idol plugged into a nest of cables, a dead mech kneeling before it, neon halos buzzing overhead.")
 
 L("roman_temple", "a Roman temple", {"hills", "meadow", "beach", "grass"},
@@ -522,7 +522,7 @@ LAYOUTS = {"roman": ["roman_temple", "roman_forum", "aqueduct", "colosseum", "vi
            "alien": ["shrine_tech", "neonstrip", "mechyard", "monolith", "stones"]}
 
 # relics scattered through the land, not just in ruin sites
-SCATTER = {"roman": [("p_rcolumn", 0.006), ("p_drums", 0.005), ("p_rstatue", 0.002), ("p_amphora", 0.003), ("p_milestone", 0.002)],"aztec": [("p_stela", 0.006), ("p_serpent", 0.004), ("p_pipes", 0.003), ("p_neon", 0.002), ("p_cables", 0.004)],
+SCATTER = {"roman": [("p_rcolumn", 0.006), ("p_drums", 0.005), ("p_rstatue", 0.002), ("p_amphora", 0.003), ("p_milestone", 0.002)],"aztec": [("p_pipes", 0.004), ("p_neon", 0.002), ("p_cables", 0.005)],   # no stelae or serpent heads: they read as faces
            "egypt": [("p_column", 0.008), ("p_sarcoph", 0.002), ("p_anubis", 0.002), ("p_pylon", 0.0004), ("p_mech", 0.0015)],
            "soviet": [("p_statue", 0.0015), ("p_pylon", 0.0005), ("p_pipes", 0.004), ("p_cctv", 0.002)],
            "rural": [("p_pylon", 0.0006), ("p_billboard", 0.002), ("p_silo", 0.0012), ("p_cctv", 0.0015)],

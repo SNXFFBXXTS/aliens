@@ -632,7 +632,7 @@ layout("stones", "a stone circle", {"grass", "hills", "meadow", "tundra", "cryst
        ["  O O  ", "O     O", "   A   ", "O     O", "  O O  "], {"O": "stone", "A": "altar"},
        "Standing stones in a ring, older than anything else here. The air hums between them.")
 layout("shrine", "a jungle shrine", {"jungle", "fungal", "crystal", "swamp", "forest"},
-       [" c I c ", "  _A_  ", " c _ c "], {"I": "idol", "A": "altar", "c": "candle"},
+       [" c I c ", "  _A_  ", " c _ c "], {"I": "obelisk", "A": "altar", "c": "candle"},
        "A strange idol watches over an altar. The candles are lit. Fresh offerings.")
 layout("solar", "a solar farm", {"desert", "salt", "savanna", "badlands"},
        ["QQQQ QQQQ", "         ", "QQQQ QQQQ", "         ", "QQQQ QQQQ"], {"Q": "panel"},
