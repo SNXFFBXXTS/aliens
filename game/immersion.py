@@ -170,44 +170,14 @@ def _loopfade(x, f=2000):
     return x
 
 
-SOUND_VERSION = "4-fm-sting"
+SOUND_VERSION = "5-wind"
 
 
 def make_sounds():
-    """soft, minimal beds: no chirps, pops or knocks; just air, water, heat and hum"""
-    rng = np.random.default_rng(7)
-    n = RATE * 12
-    t = np.arange(n) / RATE
-    swell = lambda per, depth: (1 - depth) + depth * np.sin(2 * np.pi * t / per) ** 2
-    _write("amb_wind", _loopfade(_lp(_noise(n, rng), 0.012) * swell(12, 0.5)))
-    _write("amb_cold", _loopfade(_lp(_noise(n, rng), 0.03) * swell(6, 0.6)))
-    _write("amb_forest", _loopfade(_lp(_noise(n, rng), 0.02) * swell(12, 0.3)))
-    _write("amb_jungle", _loopfade(_lp(_noise(n, rng), 0.035) * swell(4, 0.25)))
-    _write("amb_water", _loopfade(_lp(_noise(n, rng), 0.06) * (0.6 + 0.4 * np.abs(np.sin(2 * np.pi * t / 3)))))
-    _write("amb_lava", _loopfade(_lp(_noise(n, rng), 0.004) * 2 + 0.25 * np.sin(2 * np.pi * 40 * t) * swell(6, 0.5)))
-    drone = sum(np.sin(2 * np.pi * f * t + p) for f, p in ((55, 0), (55.5, 1), (82.4, 2)))
-    _write("amb_fungal", _loopfade(drone * swell(12, 0.5) + _lp(_noise(n, rng), 0.01) * 1.5))
-    chime = _lp(_noise(n, rng), 0.008) * 0.6
-    for s0, f0 in ((RATE * 2, 1318), (RATE * 7, 1046)):             # two soft, far-off notes
-        k = np.arange(RATE * 4)
-        chime[s0:s0 + len(k)] += 0.12 * np.sin(2 * np.pi * f0 * k / RATE) * np.exp(-k / (RATE * 1.2))
-    _write("amb_crystal", _loopfade(chime))
-    _write("amb_town", _loopfade(_lp(_noise(n, rng), 0.01) * swell(12, 0.3)))
-    night = _lp(_noise(n, rng), 0.006)
-    for s0 in range(0, n - 3000, RATE):                            # very sparse, soft crickets
-        if rng.random() < 0.25:
-            k = np.arange(1500)
-            night[s0:s0 + 1500] += 0.08 * np.sin(2 * np.pi * 4200 * k / RATE) * (np.sin(2 * np.pi * 30 * k / RATE) > 0) * np.exp(-k / 600)
-    _write("amb_night", _loopfade(night))
-    k = np.arange(int(RATE * 0.1))
-    _write("fx_hit", np.sin(2 * np.pi * 110 * k / RATE) * np.exp(-k / 350))
-    _write("fx_hurt", np.sin(2 * np.pi * (160 - k * 0.02) * k / RATE) * np.exp(-k / 500))
-    k = np.arange(int(RATE * 0.6))
-    _write("fx_kill", np.sin(2 * np.pi * 440 * k / RATE) * np.exp(-k / 2500))
-    k = np.arange(int(RATE * 1.2))
-    _write("fx_level", sum(np.sin(2 * np.pi * f * k / RATE) * (k > i * 4000) * np.exp(-np.maximum(0, k - i * 4000) / 6000)
-                           for i, f in enumerate((523, 659, 784))))
-    import sfx                                         # FM / wavetable effects (searching, finding, eating...)
+    """ambient beds (grainy gusting wind, whistles through gaps, faint drones) and foley effects, from sfx.py"""
+    import sfx
+    for name, x in sfx.beds().items():
+        _write(name, x)
     for name, x in sfx.sounds().items():
         _write("fx_" + name, x)
     with open(os.path.join(SND_DIR, "version"), "w") as fh:
@@ -222,7 +192,7 @@ BED_GAIN = {"amb_wind": 0.8, "amb_cold": 0.7, "amb_forest": 0.6, "amb_jungle": 0
 class Ambience:
     """quiet ambient beds that change slowly with the zone you're in (not every step); N toggles"""
 
-    def __init__(self, volume=0.07):
+    def __init__(self, volume=0.11):
         self.ok = False
         self.on = True
         self.vol = volume

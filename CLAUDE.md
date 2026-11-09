@@ -69,8 +69,10 @@ whether you move or not. Creatures glide between squares when drawn (Game.mob_po
   weight vs Game.cap = 12 + 1.5*STR kg; over it you move at 55%). Tab switches side, Enter moves one (Shift: stack),
   T takes all, U uses, X throws away, double-click moves. Containers keep what's left (World.containers(), saved as
   containers.json; old searched.json read as empty). I opens the bag alone. Game is paused while either is open.
-- Sounds: sfx.py is a tiny wavetable + FM synth (OSRS-style) making fx_open_wood/open_metal/rummage/found/empty/take/
-  eat/drink/heal/equip into game/sounds (immersion.SOUND_VERSION "3-fm" regenerates). Game.METAL picks clunk vs creak.
+- Sounds (user HATED the FM/chip blips): sfx.py makes everything from noise + sines. beds(): grainy gusting wind
+  (band-limited noise, gust envelopes, crackle grains) + sine whistles (pitch drift, vibrato, breath, sometimes a
+  semitone dyad), per-biome mixes, faint detuned drones, tin rattles for settlements. sounds(): foley (creak, thud,
+  scrape, rustle, crunch, glug, rip). SOUND_VERSION "5-wind" regenerates (~5 s). Game.METAL picks clunk vs creak.
 - Window glass uses the "ice" family: "sea" shades cycle and made windows flash.
 - Food and water drain each world tick (~14 / ~9 min from full); warnings at 25 and 0; at 0 you lose HP; no healing
   unless both > 20. Held weapon adds damage. Inventory, food, water, weapon saved in player.json.
@@ -88,6 +90,8 @@ whether you move or not. Creatures glide between squares when drawn (Game.mob_po
   main() sets it only for brand-new worlds with a character (not in --shot).
 
 ## Performance notes
+Zoom levels 0.6-2.0 (0.5 was too slow). Fog drawn at quarter res and only in a box round your sight; zoomed view
+resized with a fast scale; darkness built at half size. ~12 ms/frame at 100%, ~25 ms at 60%.
 Line of sight only recomputed when position/light changes (update_view vkey); darkness overlay keyed on what it shows
 and built with numpy; palette rebuilt ~12x/s; animated plants skipped in never-seen places. Walking ~7 ms/frame median.
 

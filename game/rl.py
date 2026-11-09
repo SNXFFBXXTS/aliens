@@ -1449,7 +1449,7 @@ class Game:
         self.screen.blit(img, img.get_rect(center=self.screen.get_rect().center))
         pygame.display.flip()
 
-    ZOOMS = (0.5, 0.75, 1.0, 1.5, 2.0)
+    ZOOMS = (0.6, 0.8, 1.0, 1.5, 2.0)
 
     def draw_world(self):
         """draw the view; zoomed views are drawn at their own size, then scaled to fit"""
@@ -1594,8 +1594,8 @@ class Game:
             pygame.draw.rect(S, (240, 210, 120), (bx, by, int(32 * u), 4))
         S.set_clip(None)
         if S is not self.screen:
-            scale = pygame.transform.scale if z > 1 else pygame.transform.smoothscale
-            self.screen.blit(scale(S, (SW, VH)), (0, HUD_H))
+            pygame.transform.scale(S, (SW, VH), self._zoomed(SW, VH))   # a fast resize: pixel art doesn't need smoothing
+            self.screen.blit(self._zoomed_s, (0, HUD_H))
         self.acid(t, now, SW, VH)
         self.screen.blit(self.vignette(SW, VH), (0, HUD_H))      # the edges of your sight close in
         if now - self.flash.get("you", 0) < 0.2:           # red flash when you're hurt
@@ -1899,6 +1899,11 @@ class Game:
                         if lit and c in ("f_lamp", "f_end", "f_drum", "f_shrine") and (x, y) in self.vis:
                             self.lamps.append((X + PX // 2, Y + PX // 2 - 2, c == "f_lamp"))
 
+    def _zoomed(self, w, h):
+        if getattr(self, "_zoomed_s", None) is None or self._zoomed_s.get_size() != (w, h):
+            self._zoomed_s = pygame.Surface((w, h)).convert()
+        return self._zoomed_s
+
     def fog_tiles(self):
         """two soft, seamless fog textures (made once): blurred noise, wrapped so they tile"""
         if not hasattr(self, "_fog"):
@@ -1921,18 +1926,39 @@ class Game:
         return self._fog
 
     def draw_fog(self, S, top, cxp, cyp, sw, vh, t):
-        """fog drifting over the ground, anchored to the world (it doesn't follow you), thicker at night"""
+        """fog drifting over the ground, anchored to the world (it doesn't follow you), thicker at night.
+        Only drawn round where you can see (beyond is black anyway), at quarter size and stretched up."""
+        Q = 4
         phase = self.clock()[1]
         thick = {"Night": 1.0, "Dusk": 0.85, "Dawn": 0.9}.get(phase, 0.6)
+        R = (max(1, self.radius) + 3) * PX                      # the box round your sight
+        hx, hy = int(self.fx * PX) - cxp + PX // 2, int(self.fy * PX) - cyp + PX // 2
+        box = pygame.Rect(hx - R, hy - R, 2 * R, 2 * R).clip(pygame.Rect(0, 0, sw, vh))
+        if box.w <= 0 or box.h <= 0:
+            return
+        qw, qh = box.w // Q + 2, box.h // Q + 2
+        if getattr(self, "_fogbuf", None) is None or self._fogbuf.get_size() != (qw, qh):
+            self._fogbuf = pygame.Surface((qw, qh), pygame.SRCALPHA)
+        buf = self._fogbuf
+        buf.fill((0, 0, 0, 0))
         for k, tile in enumerate(self.fog_tiles()):
-            w, h = tile.get_size()
+            key = ("fogq", k, thick)
+            if key not in self.mob_img:                        # the tile at quarter size, at this thickness
+                small = pygame.transform.smoothscale(tile, (tile.get_width() // Q, tile.get_height() // Q))
+                small.set_alpha(int(255 * thick))
+                flat = pygame.Surface(small.get_size(), pygame.SRCALPHA)
+                flat.blit(small, (0, 0))
+                self.mob_img[key] = flat
+            q = self.mob_img[key]
+            w, h = q.get_size()
             dx, dy = t * (9 if k == 0 else -14), t * (3 if k == 0 else 5)   # the wind moves it
-            ox = int(-(cxp - dx) % w) - w
-            oy = int(-(cyp - dy) % h) - h
-            tile.set_alpha(int(255 * thick))
-            for y in range(oy, vh + h, h):
-                for x in range(ox, sw + w, w):
-                    S.blit(tile, (x, y + top))
+            ox = int(-((cxp + box.x - dx) / Q) % w) - w
+            oy = int(-((cyp + box.y - dy) / Q) % h) - h
+            for y in range(oy, qh + h, h):
+                for x in range(ox, qw + w, w):
+                    buf.blit(q, (x, y))
+        half = pygame.transform.smoothscale(buf, (qw * Q // 2, qh * Q // 2))      # smooth to half size,
+        S.blit(pygame.transform.scale(half, (qw * Q // 2 * 2, qh * Q // 2 * 2)), (box.x, box.y + top))   # fast doubling
 
     def vignette(self, w, h):
         key = ("vig", w, h)
@@ -2000,7 +2026,8 @@ class Game:
             alpha = alpha * (1 - 0.8 * np.clip(1 - near / 3.2, 0, 1))
         a[j, i, 3] = alpha.astype(np.int64)
         srf = pygame.image.frombuffer(a.tobytes(), (cols, rows), "RGBA")
-        srf = pygame.transform.smoothscale(srf, (cols * PX, rows * PX)).convert_alpha()   # soft edges; display format = fast
+        half = pygame.transform.smoothscale(srf, (cols * PX // 2, rows * PX // 2))        # soft edges, built at half size
+        srf = pygame.transform.scale(half, (cols * PX, rows * PX)).convert_alpha()      # and stretched (display format = fast)
         self.dark = (key, srf)
         return srf
 
