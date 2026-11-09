@@ -41,6 +41,14 @@ still uses cells). Body is a small box (BODY); walls stop one axis so you slide 
 1-wide gaps. Walking into a creature attacks it (ATTACK_S cooldown). The world takes a turn every TICK_S seconds
 whether you move or not. Creatures glide between squares when drawn (Game.mob_pos). `act()` is only used by --shot.
 
+## Buildings and size
+- buildings.py: towns have real houses (not 1-cell huts): hwall/hwin/hdoor/hfloor cells, door faces the lane, windows,
+  bigger houses split into 2 rooms, furniture (bed first, then table/crate/barrel/bench/rack). Never straddle zones.
+  proto.gen_cells calls buildings.town. World.houses(cx, cy) finds the rects; Game.draw_roofs draws a hipped roof
+  (Game.roof, cached) over each seen house, and hides the one you're standing in. Old saves keep their old huts.
+- Character size slider: Z (or [ ]) -> Game.size (0.3..1.2, default 0.55), saved in ROOT/settings.json. Hero and
+  creatures scale from their feet; collision body scales a bit too.
+
 ## Content (Nov 2026)
 - structures.py: 33 abandoned-place layouts (ASCII plans + props, rotated/mirrored, ~1 in 4 zones, by biome);
   cultures.py adds a culture per region gone dystopian (forest/jungle Aztec, desert Egyptian, tundra Soviet,

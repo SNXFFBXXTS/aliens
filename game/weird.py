@@ -798,10 +798,11 @@ def ground(p, x, y, fam, r):
     c[g > 0.94] = F(fam, 2)
 
 
-BUILT = {"wall", "wwall", "ruin", "floor", "wfloor", "packed", "scorch", "railh", "railv", "mosaic"}
+BUILT = {"wall", "wwall", "ruin", "floor", "wfloor", "packed", "scorch", "railh", "railv", "mosaic",
+         "hwall", "hwin", "hdoor", "hfloor"}
 
 
-WALLS = ("wall", "wwall", "ruin")
+WALLS = ("wall", "wwall", "ruin", "hwall", "hwin")
 
 
 def built(p, x, y, b, r, nb=(False, False, False, False)):
@@ -812,10 +813,21 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
     g = np.random.default_rng(int(r[0] * 1e9) & 0xFFFFFFFF).random((TS, TS))
     yy, xx = np.mgrid[0:TS, 0:TS]
     gx, gy = int(r[1] * 977), int(r[2] * 977)
-    if b in ("wall", "ruin", "wwall"):
+    if b in ("wall", "ruin", "wwall", "hwall", "hwin"):
         thin = (up or down) and not (left or right)      # a wall running up the screen is seen edge-on: narrow
         t = np.empty((TS, TS), np.uint8)
-        if b == "wwall":
+        if b in ("hwall", "hwin"):                        # lived-in house: limewash between timber posts
+            t[:] = np.where(g < 0.12, F("salt", 3), F("salt", 4))
+            t[(xx % 16 == 0) | (xx % 16 == 1)] = F("wood", 2)
+            t[(yy == 14) | (yy == 15)] = F("wood", 2)
+            lit, mid, dim = F("salt", 6), F("salt", 5), F("wood", 1)
+            if b == "hwin":                                # a window: dark glass with a warm glint, in a frame
+                t[8:24, 7:25] = F("wood", 1)
+                t[10:22, 9:23] = F("sea", 1)
+                t[10:22, 15:17] = F("wood", 1)
+                t[15:17, 9:23] = F("wood", 1)
+                t[11:13, 10:13] = F("ochre", 6)
+        elif b == "wwall":
             t[:] = np.where((xx // 5) % 2 == 0, F("wood", 3), F("wood", 4))
             t[xx % 5 == 0] = F("wood", 1)
             lit, mid, dim = F("wood", 5), F("wood", 4), F("wood", 1)
@@ -854,6 +866,16 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
         c[:] = np.where(g < 0.25, F("cobble", 1), F("cobble", 2))
         c[(yy % 16 == 0) | (xx % 16 == 0)] = F("cobble", 1)
         c[(g > 0.985)] = F("dirt", 2)
+    elif b in ("hfloor", "hdoor"):                      # warm boards, a rug's edge here and there
+        plank = xx // 8
+        tone = (plank * 5 + gx) % 3
+        c[:] = np.array([F("wood", 3), F("wood", 4), F("wood", 3)])[tone]
+        c[xx % 8 == 0] = F("wood", 1)
+        c[((yy + plank * 11 + gy) % 29) == 0] = F("wood", 1)
+        c[g < 0.02] = F("wood", 2)
+        if b == "hdoor":                                   # threshold and door jambs
+            c[:, :4] = F("wood", 1); c[:, -4:] = F("wood", 1)
+            c[:3, :] = F("wood", 5)
     elif b == "wfloor":
         plank = yy // 6
         tone = (plank * 7 + gy) % 3

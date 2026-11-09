@@ -674,7 +674,7 @@ layout("chapel", "a ruined chapel", {"grass", "meadow", "forest", "hills"},
 
 CELL = {"#": "wall", "w": "wwall", "%": "ruin", ".": "floor", ",": "wfloor", "_": "packed", "*": "scorch", "+": "floor",
         "~": "mosaic"}
-NOT_ON = {"deep", "ocean", "shallow", "lake", "river", "bridge", "house", "plaza", "bonfire", "lava", "mountain", "peak",
+NOT_ON = {"deep", "ocean", "shallow", "lake", "river", "bridge", "house", "plaza", "hwall", "hwin", "hdoor", "hfloor", "bonfire", "lava", "mountain", "peak",
           "volcano", "seaice"}
 
 

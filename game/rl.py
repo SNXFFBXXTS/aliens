@@ -50,7 +50,7 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "peak": "Snowy peaks", "ash": "Ash wastes", "lava": "Lava", "crust": "Cooling lava", "volcano": "Volcano",
          "fungal": "Fungal forest", "crystal": "Crystal fields", "lake": "Lake", "river": "River", "road": "Road",
          "bridge": "Bridge", "house": "House", "plaza": "Town", "trail": "Trail", "bonfire": "Town",
-         "wall": "Wall", "wwall": "Timber wall", "ruin": "Rubble", "floor": "Concrete floor", "wfloor": "Floorboards",
+         "wall": "Wall", "wwall": "Timber wall", "ruin": "Rubble", "floor": "Concrete floor", "wfloor": "Floorboards", "hwall": "House", "hwin": "House", "hdoor": "Doorway", "hfloor": "Indoors",
          "packed": "Packed earth", "scorch": "Scorched ground", "railh": "Railway", "railv": "Railway",
          "mosaic": "Mosaic floor"}
 UNDER = {"road", "trail", "plaza", "house", "bonfire", "bridge"}     # drawn as flowing bands over the land
@@ -59,7 +59,8 @@ BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too de
            "house": "Someone lives there.", "lava": "Lava! Far too hot to step in.",
            "river": "The current's too strong to wade. Find a bridge.", "lake": "The lake's too deep to wade.",
            "bonfire": "The bonfire's too hot to stand in.", "wall": "A solid wall.", "wwall": "A timber wall.",
-           "ruin": "A heap of rubble and broken wall."}
+           "ruin": "A heap of rubble and broken wall.", "hwall": "A house wall.",
+           "hwin": "A window. Grimy glass; shapes move inside, or don't."}
 
 
 class World:
@@ -170,6 +171,19 @@ class World:
         for (cx, cy) in self.codes:
             if self.inside(cx, cy):
                 self.write_chunk(cx, cy)
+
+    def houses(self, cx, cy):
+        """the houses in a loaded zone: (x0, y0, x1, y1) rects in world cells"""
+        if not hasattr(self, "_houses"):
+            self._houses = {}
+        k = (cx, cy)
+        if k not in self._houses:
+            codes = self.codes.get(k)
+            if codes is None:
+                return []
+            import buildings
+            self._houses[k] = buildings.find(codes, cx * CS, cy * CS)
+        return self._houses[k]
 
     def cell(self, gx, gy):
         b = self.chunk(gx // CS, gy // CS)
@@ -1118,6 +1132,7 @@ class Game:
                     pygame.draw.rect(S, (60, 0, 0), (fx_ - bw // 2, by, bw, 3))
                     pygame.draw.rect(S, (230, 50, 50), (fx_ - bw // 2, by, int(bw * m.hp / m.maxhp), 3))
         self._last_draw = now
+        self.draw_roofs(S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
         S.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), top - (cyp % PX)))
         glow = self.glow_frames()
         for (fx, fy) in fires:                           # firelight pushes back the dark
@@ -1227,6 +1242,75 @@ class Game:
                     f = int((phase / 6.2832) % 1 * len(surfs))
                     S.blit(surfs[f], (sx - pad, sy - pad))
         return fires
+
+    ROOFS = [(150, 68, 44), (66, 72, 90), (146, 116, 58), (74, 92, 56), (120, 52, 60)]
+
+    def draw_roofs(self, S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y):
+        """every house has a roof; the one you're standing in lifts off so you can see inside"""
+        for zy in range(c0y, c1y + 1):
+            for zx in range(c0x, c1x + 1):
+                for (x0, y0, x1, y1) in self.w.houses(zx, zy):
+                    if x0 <= self.px <= x1 and y0 <= self.py <= y1:
+                        continue
+                    if not any(self.w.was_seen(x, y) for x in (x0, x1) for y in (y0, y1)) and \
+                            not self.w.was_seen((x0 + x1) // 2, (y0 + y1) // 2):
+                        continue                                   # never seen: stays in the dark
+                    X, Y = x0 * PX - cxp, y0 * PX - cyp + top
+                    w, h = (x1 - x0 + 1) * PX, (y1 - y0 + 1) * PX
+                    if X > sw or Y > top + vh or X + w < 0 or Y + h < top:
+                        continue
+                    S.blit(self.roof(w, h, (x0 * 31 + y0 * 17) % 997), (X - 4, Y - 6))
+
+    def roof(self, w, h, seed):
+        """a hipped roof of tiles or thatch with its shadow, w x h pixels (plus overhang)"""
+        if not hasattr(self, "_roofs"):
+            self._roofs = {}
+        key = (w, h, seed)
+        if key in self._roofs:
+            return self._roofs[key]
+        rng = random.Random(seed)
+        base = self.ROOFS[seed % len(self.ROOFS)]
+        flip = h > w                                      # the ridge runs along the long side
+        W, H = (h, w) if flip else (w, h)
+        W += 8; H += 8
+        r = pygame.Surface((W, H), pygame.SRCALPHA)
+        sh = lambda k: tuple(max(0, min(255, int(c * k))) for c in base)
+        m = H // 2
+        north = [(0, 0), (W, 0), (W - m, m), (m, m)]
+        south = [(0, H), (W, H), (W - m, m), (m, m)]
+        west, east = [(0, 0), (m, m), (0, H)], [(W, 0), (W - m, m), (W, H)]
+        for poly, k in ((north, 1.1), (south, 0.72), (west, 0.92), (east, 0.6)):
+            pygame.draw.polygon(r, sh(k), poly)
+        line = sh(0.5)
+        for y in range(5, m, 6):                          # courses of tiles
+            pygame.draw.line(r, line, (y, y), (W - y, y))
+            pygame.draw.line(r, line, (y, H - y), (W - y, H - y))
+            for x in range(y + (y // 6 % 2) * 4, W - y, 8):
+                pygame.draw.line(r, line, (x, y - 5), (x, y))
+                pygame.draw.line(r, line, (x, H - y), (x, H - y + 5))
+        for x in range(5, m, 6):
+            pygame.draw.line(r, line, (x, x), (x, H - x))
+            pygame.draw.line(r, line, (W - x, x), (W - x, H - x))
+        pygame.draw.line(r, sh(1.35), (m, m), (W - m, m), 2)          # ridge
+        for a, b in (((0, 0), (m, m)), ((W, 0), (W - m, m)), ((0, H), (m, m)), ((W, H), (W - m, m))):
+            pygame.draw.line(r, sh(0.45), a, b, 2)                   # hips
+        pygame.draw.lines(r, (12, 10, 14), True, [(0, 0), (W - 1, 0), (W - 1, H - 1), (0, H - 1)], 2)
+        if W > 4 * PX and rng.random() < 0.8:                        # chimney
+            cx = int(W * rng.uniform(0.25, 0.7))
+            cy = m - 14
+            pygame.draw.rect(r, (40, 34, 38), (cx + 4, cy + 6, 12, 14))
+            pygame.draw.rect(r, (96, 80, 76), (cx, cy, 12, 16))
+            pygame.draw.rect(r, (130, 112, 104), (cx, cy, 12, 4))
+            pygame.draw.rect(r, (20, 16, 18), (cx + 3, cy + 1, 6, 2))
+        if flip:
+            r = pygame.transform.rotate(r, 90)
+        out = pygame.Surface((r.get_width() + 10, r.get_height() + 10), pygame.SRCALPHA)
+        shadow = pygame.Surface(r.get_size(), pygame.SRCALPHA)
+        shadow.fill((0, 0, 0, 110))
+        out.blit(shadow, (8, 10))
+        out.blit(r, (0, 0))
+        self._roofs[key] = out
+        return out
 
     def foot_shadow(self):
         if not hasattr(self, "_foot"):
