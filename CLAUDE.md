@@ -77,6 +77,18 @@ whether you move or not. Creatures glide between squares when drawn (Game.mob_po
 - Food and water drain each world tick (~14 / ~9 min from full); warnings at 25 and 0; at 0 you lose HP; no healing
   unless both > 20. Held weapon adds damage. Inventory, food, water, weapon saved in player.json.
 
+## Maps, crew, cold open (Nov 2026)
+- Minimap top-right (Game.minimap: 64x64 squares round you from World.seen + codes, coloured by Game.code_colour; V
+  toggles). World map on M (Game.draw_map): explored clear, unexplored dimmed, towns as houses, you pulsing.
+- Bag window supports mouse drag and drop (whole stack; Shift = one). Searching is instant (no wait).
+- Pipes prop redrawn (round shaded pipeline, flanges, saddles, valve wheel or broken end) and ~5x rarer.
+- "Drift" crew archetypes (old late-night anime vibe, NOT copies; the old "Bebop" tag was renamed Drift): Lounge Singer,
+  Bounty Clerk, Noodle Mechanic, Rock Wrangler, Lapsed Monk, Undertaker (+ the earlier Bounty Hunter etc.).
+  Restore point before them: git tag before-anime-characters (branch backup/before-anime-characters).
+- New story opens on a title card (Game.draw_cold_open): eyecatch-style diagonal colour field, film grain, letterbox,
+  "REEL nn" + generated title (REEL_WORDS + REEL_FORMS), the character big and flat, FM jazz sting (sfx "sting").
+  main() sets it only for brand-new worlds with a character (not in --shot).
+
 ## Performance notes
 Line of sight only recomputed when position/light changes (update_view vkey); darkness overlay keyed on what it shows
 and built with numpy; palette rebuilt ~12x/s; animated plants skipped in never-seen places. Walking ~7 ms/frame median.

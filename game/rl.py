@@ -452,6 +452,7 @@ class Game:
         else:
             self.px, self.py = self.start_spot()
             self.hp = self.maxhp
+            self.new_story = bool(self.char)                # main() opens a new story on a title card
             who = f"{self.char['name']}, {self.char['archetype'].lower()}, " if self.char else "You "
             self.say(who + ("arrive" if not self.char else "arrives") + " in town. M opens the world map (travel with the arrows, M again to zoom in).")
         self.here = self.w.cell(self.px, self.py)
@@ -907,6 +908,8 @@ class Game:
     def update(self, dt):
         """real time: glide about, bump into things, and let the world take its turns"""
         self.sync()
+        if getattr(self, "cold_open", None):
+            return
         if self.dead or self.show_map or self.show_inv or self.loot:
             return
         now = time.monotonic()
@@ -1273,7 +1276,87 @@ class Game:
         self.dark = None
         self.say(f"Zoom {int(self.ZOOMS[self.zoom] * 100)}%")
 
+    REEL_WORDS = ["Dust Road", "Last Call", "Rust Moon", "Cold Engine", "Lost Signal", "Ash Rain", "Low Orbit",
+                  "Static", "Burnt Sugar", "Slow Gravity", "Paper Moon", "Empty Chair", "Neon Rain", "Long Fall"]
+    REEL_FORMS = ["Blues", "Nocturne", "Waltz", "Requiem", "Lullaby", "Serenade", "Overture", "Shuffle", "Rag", "Ballad"]
+
+    def draw_cold_open(self):
+        """the title card a new story opens on: an old late-night anime eyecatch. Any key goes on."""
+        sw, sh = self.screen.get_size()
+        t = time.monotonic() - self.cold_open
+        if not getattr(self, "_card", None):
+            import charcreate
+            r = random.Random(self.w.seed)
+            gear = list(self.char.get("look", [None] * 4))[:4]
+            look = tuple(gear) + (tuple(self.char["coat"]), tuple(self.char["trim"]))   # the full outfit, gear and all
+            coat, trim = look[4], look[5]
+            card = pygame.Surface((sw, sh))
+            card.fill(tuple(int(v * 0.35) for v in coat))
+            pygame.draw.polygon(card, tuple(int(v * 0.85) for v in trim),             # a hard diagonal colour field
+                                [(int(sw * 0.52), 0), (sw, 0), (sw, sh), (int(sw * 0.36), sh)])
+            pygame.draw.polygon(card, tuple(int(v * 0.55) for v in trim),
+                                [(int(sw * 0.50), 0), (int(sw * 0.52), 0), (int(sw * 0.36), sh), (int(sw * 0.34), sh)])
+            big = pygame.font.Font(charcreate.CJK, int(sh * 0.8))                     # their body symbol, huge and faint
+            g = big.render(self.char["body"], True, (0, 0, 0))
+            g.set_alpha(40)
+            card.blit(g, (int(sw * 0.02), int(sh * 0.02)))
+            fig = pygame.Surface((int(sh * 0.9), int(sh * 0.9)), pygame.SRCALPHA)      # them, flat and bold
+            charcreate.draw_char(fig, fig.get_width() // 2, fig.get_height() // 2, int(sh * 0.42), self.char["body"],
+                                 look, tuple(self.char["skin_rgb"]), None)
+            card.blit(fig, (int(sw * 0.62) - fig.get_width() // 2, int(sh * 0.52) - fig.get_height() // 2))
+            serif = "/usr/share/fonts/noto/NotoSerif-BoldItalic.ttf"
+            try:
+                f_small, f_big = pygame.font.Font(serif, 26), pygame.font.Font(serif, 64)
+            except OSError:
+                f_small, f_big = self.big, self.big
+            title = f"{r.choice(self.REEL_WORDS)} {r.choice(self.REEL_FORMS)}"
+            card.blit(f_small.render(f"REEL {r.randint(1, 26):02d}", True, (235, 225, 200)), (70, int(sh * 0.30)))
+            y = int(sh * 0.36)
+            for word in title.upper().split():                                        # stacked, eyecatch-style
+                img = f_big.render(word, True, (245, 240, 225))
+                card.blit(f_big.render(word, True, (0, 0, 0)), (74, y + 4))
+                card.blit(img, (70, y))
+                y += int(f_big.get_height() * 0.95)
+            sub = f"{self.char['name']}  ·  {self.char['archetype']}"
+            card.blit(self.font.render(sub, True, (230, 220, 200)), (72, y + 14))
+            card.blit(self.small.render("stranded, day one", True, (200, 190, 170)), (72, y + 40))
+            grain = []                                                                 # film grain, a few frames
+            for k in range(4):
+                n = np.random.default_rng(k).integers(0, 255, (sh // 2, sw // 2), dtype=np.uint8)
+                a = np.zeros((sh // 2, sw // 2, 4), np.uint8)
+                a[..., 0] = a[..., 1] = a[..., 2] = n
+                a[..., 3] = 26
+                gs = pygame.image.frombuffer(a.tobytes(), (sw // 2, sh // 2), "RGBA")
+                grain.append(pygame.transform.scale(gs, (sw, sh)))
+            yy, xx = np.mgrid[0:sh // 4, 0:sw // 4]                                    # vignette
+            d = np.sqrt(((xx - sw / 8) / (sw / 8)) ** 2 + ((yy - sh / 8) / (sh / 8)) ** 2)
+            va = np.zeros((sh // 4, sw // 4, 4), np.uint8)
+            va[..., 3] = np.clip((d - 0.6) * 260, 0, 200).astype(np.uint8)
+            vig = pygame.transform.smoothscale(pygame.image.frombuffer(va.tobytes(), (sw // 4, sh // 4), "RGBA"), (sw, sh))
+            self._card = (card, grain, vig)
+            self.amb.fx("sting", 2.5)
+        card, grain, vig = self._card
+        jitter = int(2 * math.sin(t * 37)) if t < 2 else 0                            # a little gate weave
+        self.screen.fill((0, 0, 0))
+        self.screen.blit(card, (0, jitter))
+        self.screen.blit(grain[int(t * 12) % len(grain)], (0, 0))
+        self.screen.blit(vig, (0, 0))
+        bar = int(sh * 0.09)                                                           # letterbox
+        pygame.draw.rect(self.screen, (0, 0, 0), (0, 0, sw, bar))
+        pygame.draw.rect(self.screen, (0, 0, 0), (0, sh - bar, sw, bar))
+        if t > 1.2:
+            hint = self.small.render("press any key", True, (150, 145, 135))
+            self.screen.blit(hint, (sw - hint.get_width() - 24, sh - bar + 12))
+        if t < 0.35:                                                                   # fade up from black
+            fade = pygame.Surface((sw, sh))
+            fade.set_alpha(int(255 * (1 - t / 0.35)))
+            self.screen.blit(fade, (0, 0))
+
     def handle(self, e):
+        if getattr(self, "cold_open", None):
+            if e.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN) and time.monotonic() - self.cold_open > 0.4:
+                self.cold_open, self._card = None, None
+            return True
         if self.sizer and e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and \
                 self.slider_rect().inflate(0, 10).collidepoint(e.pos):
             self.dragging = True
@@ -2130,6 +2213,10 @@ class Game:
             self.screen.blit(img, img.get_rect(center=(sw // 2, sh // 2 - 30 + i * 32)))
 
     def frame(self):
+        if getattr(self, "cold_open", None):
+            self.draw_cold_open()
+            pygame.display.flip()
+            return
         if self.show_map:
             self.draw_map()
         else:
@@ -2195,6 +2282,8 @@ def main():
         g.save()
         print("at", g.px, g.py, g.here, "| hp", g.hp, "lvl", g.lvl, "xp", g.xp, "| mobs loaded", len(g.w.mobs), "|", " / ".join(g.msgs))
         return
+    if getattr(g, "new_story", False):
+        g.cold_open = time.monotonic()
     clock = pygame.time.Clock()
     running = True
     while running:

@@ -106,4 +106,14 @@ def sounds():
     # readying a weapon: a short metallic shing
     S["equip"] = mix(voice(0.25, "saw", freq=((0, 1800), (1, 2600)), amp=((0, 0), (0.05, 0.3), (1, 0)),
                            fm_rate=2600 * 1.5, fm_depth=((0, 0.2), (1, 0))), crush=48)
+    # cold-open sting: a brassy three-hit jazz stab (FM at ratio 1 sounds like brass), walking bass, a hi-hat
+    def stab(t, root, dur):
+        return [voice(dur, "saw", freq=((0, root * r), (1, root * r)), amp=((0, 0), (0.04, 0.32), (0.5, 0.2), (1, 0)),
+                      fm_rate=root * r, fm_depth=((0, 0.5), (0.3, 0.15), (1, 0.05)), start=t) for r in (1, 1.26, 1.5, 1.78)]
+    S["sting"] = mix(*stab(0.0, 233, 0.16), *stab(0.22, 233, 0.12), *stab(0.42, 277, 0.7),
+                     *[voice(0.22, "tri", freq=((0, f), (1, f)), amp=((0, 0.7), (1, 0)), start=t)
+                       for t, f in ((0, 58), (0.22, 69), (0.42, 78), (0.64, 87))],
+                     *[voice(0.04, "noise", freq=((0, 8000), (1, 8000)), amp=((0, 0.25), (1, 0)), start=t, seed=20 + i)
+                       for i, t in enumerate((0, 0.11, 0.22, 0.33, 0.42))],
+                     echo=0.12, echo_gain=0.25, crush=64)
     return S

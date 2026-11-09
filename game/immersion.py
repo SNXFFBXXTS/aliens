@@ -165,7 +165,7 @@ def _loopfade(x, f=2000):
     return x
 
 
-SOUND_VERSION = "3-fm"
+SOUND_VERSION = "4-fm-sting"
 
 
 def make_sounds():
