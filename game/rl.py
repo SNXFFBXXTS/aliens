@@ -378,7 +378,7 @@ class Game:
             self.px, self.py = self.start_spot()
             self.hp = self.maxhp
             who = f"{self.char['name']}, {self.char['archetype'].lower()}, " if self.char else "You "
-            self.say(who + "arrives in town. M opens the world map (travel with the arrows, M again to zoom in).")
+            self.say(who + ("arrive" if not self.char else "arrives") + " in town. M opens the world map (travel with the arrows, M again to zoom in).")
         self.here = self.w.cell(self.px, self.py)
         self.update_view()
         for i in self.w.dead:
@@ -648,16 +648,7 @@ class Game:
         day, phase, r, tint = self.clock()
         r = min(r, im.THICK.get(self.here, 99))
         self.radius = r
-        full = im.fov(self.px, self.py, r, self.w.cell)
-        fx, fy = getattr(self, "facing", (0, 1))
-        fl = (fx * fx + fy * fy) ** 0.5 or 1
-        def in_cone(x, y):                       # Zomboid-style: far ahead, only close round you and behind
-            vx, vy = x - self.px, y - self.py
-            d2 = vx * vx + vy * vy
-            if d2 <= 2.3 ** 2:
-                return True
-            return (vx * fx + vy * fy) / (d2 ** 0.5 * fl) >= 0.42
-        self.vis = {q for q in full if in_cone(*q)}
+        self.vis = im.fov(self.px, self.py, r, self.w.cell)   # all round you, as far as you can see
         self.w.remember(self.vis)
         self.dark = None
         self.amb.area(self.zone_mood(), phase == "Night")
