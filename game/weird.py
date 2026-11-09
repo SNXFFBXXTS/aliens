@@ -799,7 +799,8 @@ def ground(p, x, y, fam, r):
 
 
 BUILT = {"wall", "wwall", "ruin", "floor", "wfloor", "packed", "scorch", "railh", "railv", "mosaic",
-         "hwall", "hwin", "hdoor", "hfloor", "htile", "hrug"}
+         "hwall", "hwin", "hdoor", "hfloor", "htile", "hrug",
+         "hcarpet", "hcarpetb", "hlino", "hbath", "hconc", "gdoor", "street"}
 
 
 WALLS = ("wall", "wwall", "ruin", "hwall", "hwin")
@@ -874,6 +875,34 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
         c[:] = np.where(g < 0.25, F("cobble", 1), F("cobble", 2))
         c[(yy % 16 == 0) | (xx % 16 == 0)] = F("cobble", 1)
         c[(g > 0.985)] = F("dirt", 2)
+    elif b == "street":                                    # estate tarmac: dark, gritty, patched
+        c[:] = np.where(g < 0.5, F("stone", 1), F("stone", 2))
+        c[g > 0.97] = F("stone", 3)
+        if (gx + gy * 3) % 11 == 0:
+            c[8:20, 6:22] = np.where(g[8:20, 6:22] < 0.6, F("stone", 2), F("ash", 1))   # a patch
+    elif b == "hcarpet":                                   # 70s lounge carpet: burnt orange with brown swirls
+        c[:] = F("rust", 4)
+        sw = ((xx + gx * 3) // 4 + (yy + gy * 5) // 4) % 7
+        c[sw == 0] = F("ochre", 3)
+        c[((xx - yy + gx) % 16 == 0)] = F("rust", 2)
+        c[g < 0.05] = F("rust", 3)
+    elif b == "hcarpetb":                                  # bedroom carpet: avocado-and-mustard shag
+        c[:] = np.where(g < 0.5, F("moss", 3), F("moss", 4))
+        c[g > 0.93] = F("ochre", 4)
+    elif b == "hlino":                                     # kitchen lino: big check, a bit worn
+        c[:] = np.where(((xx // 16) + (yy // 16)) % 2 == 0, F("salt", 5), F("ochre", 4))
+        c[g < 0.03] = F("salt", 3)
+    elif b == "hbath":                                     # bathroom: small tiles
+        c[:] = F("ice", 5)
+        c[(xx % 8 == 0) | (yy % 8 == 0)] = F("ice", 3)
+    elif b == "hconc":                                     # garage: concrete, an oil stain
+        c[:] = np.where(g < 0.3, F("stone", 2), F("stone", 3))
+        if (gx * 7 + gy * 13) % 9 == 0:                   # the odd oil stain, not one on every slab
+            c[(((xx - 12 - gx % 9) ** 2 + (yy - 14 - gy % 7) ** 2) < 22) & (g < 0.8)] = F("ash", 0)
+    elif b == "gdoor":                                     # up-and-over garage door, open: metal runners
+        c[:] = np.where(g < 0.3, F("stone", 2), F("stone", 3))
+        c[:, :3] = F("stone", 5); c[:, -3:] = F("stone", 5)
+        c[:3, :] = F("stone", 1)
     elif b == "htile":                                     # kitchen: square stone tiles
         c[:] = np.where(((xx // 16) + (yy // 16) + gx) % 2 == 0, F("stone", 4), F("stone", 3))
         c[(xx % 16 == 0) | (yy % 16 == 0)] = F("stone", 2)

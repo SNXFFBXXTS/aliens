@@ -575,7 +575,7 @@ def gen_cells(wd, ox, oy, zw, zh):
     for n, (tx, ty) in enumerate(wd.towns):
         rng = np.random.default_rng(wd.seed + 5 + n * 7919)   # each town's own layout
         lx, ly = (tx + 0.5 - ox) * ZS, (ty + 0.5 - oy) * ZS
-        reach = 5.5 * K * 0.85 * 1.25
+        reach = 34.0                                       # towns spread into the zones round the square
         if -reach - 2 < lx < zw + reach + 2 and -reach - 2 < ly < zh + reach + 2:
             d2 = (i - lx) ** 2 + (j - ly) ** 2
             ok = np.isin(b, ["river", "bridge", "lake", "shallow", "ocean", "deep", "lava"], invert=True)
@@ -583,20 +583,30 @@ def gen_cells(wd, ox, oy, zw, zh):
             b[(d2 < pr ** 2) & ok] = "plaza"
             if 0 <= int(lx) < zw and 0 <= int(ly) < zh and ok[int(ly), int(lx)]:
                 b[int(ly), int(lx)] = "bonfire"                 # a fire in the middle of every town
-            lanes = rng.integers(4, 7)
-            base = rng.uniform(0, 6.28)
-            angles = []
-            for k in range(lanes):                              # lanes out of the square
-                a = base + k * 6.28 / lanes + rng.uniform(-0.25, 0.25)
-                angles.append(a)
-                ca, sa = math.cos(a), math.sin(a)
-                for t in np.arange(pr - 1, reach, 0.5):
-                    x, y = int(round(lx + ca * t)), int(round(ly + sa * t))
-                    if 0 <= x < zw and 0 <= y < zh and ok[y, x]:
-                        b[y, x] = "road"
-            import buildings                                    # real houses along them (walls, doors, rooms)
-            buildings.town(b, ok, rng, lx, ly, pr, reach, angles, zw, zh,
-                           int(round(ox * ZS)), int(round(oy * ZS)), ZS)
+            # a 70s estate: straight roads out of the square, closes (cul-de-sacs) off them with a turning head
+            streets = []
+            for (dx, dy) in ((1, 0), (0, 1), (-1, 0), (0, -1)):
+                if rng.random() < 0.85:
+                    L = rng.uniform(reach - 6, reach)
+                    streets.append((lx + dx * pr, ly + dy * pr, dx, dy, L, "main"))
+                    for _ in range(int(rng.integers(1, 3))):
+                        t = rng.uniform(10, L - 4)
+                        side = 1 if rng.random() < 0.5 else -1
+                        streets.append((lx + dx * (pr + t), ly + dy * (pr + t), -dy * side, dx * side,
+                                        rng.uniform(12, 20), "close"))
+            for (sx, sy, dx, dy, L, kind) in streets:
+                for t in np.arange(0, L, 0.5):                   # two cells wide
+                    for o in (0, 1):
+                        x = int(math.floor(sx + dx * t + (o if dy else 0)))
+                        y = int(math.floor(sy + dy * t + (o if dx else 0)))
+                        if 0 <= x < zw and 0 <= y < zh and ok[y, x] and b[y, x] not in ("plaza", "bonfire", "road"):
+                            b[y, x] = "street"
+                if kind == "close":                              # turning head
+                    ex, ey = sx + dx * L + 0.5, sy + dy * L + 0.5
+                    head = ((i - ex) ** 2 + (j - ey) ** 2 < 2.6 ** 2) & ok
+                    b[head & ~np.isin(b, ["plaza", "bonfire", "road"])] = "street"
+            import buildings                                    # real 70s houses along them
+            buildings.town(b, ok, rng, streets, zw, zh, int(round(ox * ZS)), int(round(oy * ZS)), ZS)
     if zw == ZS and zh == ZS and abs(ox - round(ox)) < 1e-9 and abs(oy - round(oy)) < 1e-9:
         import structures                              # abandoned places (only when making a whole zone)
         structures.place(wd, b, int(round(ox)), int(round(oy)), zw, zh)

@@ -36,6 +36,10 @@ LOOT = {
     "f_end":    (0.5, [("bandage", 3), ("water", 2), ("battery", 1), ("medkit", 1)], 1),
     "f_crate":  (0.85, [("beans", 3), ("water", 3), ("scrap", 3), ("rope", 2), ("crowbar", 1), ("fuel", 1)], 3),
     "f_sink":   (0.4, [("water", 4), ("bandage", 1)], 1),
+    "f_fridge": (0.75, [("beans", 2), ("water", 3), ("fruit", 2), ("jerky", 2), ("tea", 2)], 3),
+    "f_ward":   (0.6, [("cloth", 4), ("rope", 1), ("bandage", 1)], 2),
+    "f_bench":  (0.85, [("crowbar", 1), ("pipe", 1), ("wire", 3), ("scrap", 3), ("battery", 1), ("circuit", 1)], 3),
+    "f_barrel": (0.5, [("fuel", 1), ("water", 1), ("scrap", 1)], 1),
     "p_crate":  (0.8, [("scrap", 4), ("wire", 3), ("beans", 2), ("water", 2), ("circuit", 1), ("crowbar", 1)], 3),
     "p_barrel": (0.6, [("water", 4), ("fuel", 1), ("scrap", 2)], 2),
     "p_rack":   (0.6, [("pipe", 2), ("scrap", 3), ("wire", 2), ("rope", 1), ("battery", 1)], 2),
@@ -49,8 +53,8 @@ LOOT = {
     "p_panel":  (0.6, [("circuit", 2), ("wire", 3), ("battery", 2)], 2),
 }
 
-NAMES = {"f_stove": "stove", "f_shelf": "shelf", "f_dress": "dresser", "f_end": "bedside table", "f_crate": "crate",
-         "f_sink": "washbasin"}
+NAMES = {"f_stove": "cooker", "f_shelf": "cupboard", "f_dress": "dresser", "f_end": "bedside table", "f_crate": "box",
+         "f_sink": "sink", "f_fridge": "fridge", "f_ward": "wardrobe", "f_bench": "workbench", "f_barrel": "oil drum"}
 
 
 def loot(seed, code, x, y):

@@ -53,7 +53,8 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "fungal": "Fungal forest", "crystal": "Crystal fields", "lake": "Lake", "river": "River", "road": "Road",
          "bridge": "Bridge", "house": "House", "plaza": "Town", "trail": "Trail", "bonfire": "Town",
          "wall": "Wall", "wwall": "Timber wall", "ruin": "Rubble", "floor": "Concrete floor", "wfloor": "Floorboards", "hwall": "House", "hwin": "House", "hdoor": "Doorway", "hfloor": "Indoors",
-         "htile": "Kitchen", "hrug": "Indoors",
+         "htile": "Kitchen", "hrug": "Indoors", "hcarpet": "Lounge", "hcarpetb": "Bedroom", "hlino": "Kitchen",
+         "hbath": "Bathroom", "hconc": "Garage", "gdoor": "Garage", "street": "Street",
          "packed": "Packed earth", "scorch": "Scorched ground", "railh": "Railway", "railv": "Railway",
          "mosaic": "Mosaic floor"}
 UNDER = {"road", "trail", "plaza", "house", "bonfire", "bridge"}     # drawn as flowing bands over the land
@@ -1304,7 +1305,7 @@ class Game:
                     pygame.draw.rect(S, (60, 0, 0), (fx_ - bw // 2, by, bw, 3))
                     pygame.draw.rect(S, (230, 50, 50), (fx_ - bw // 2, by, int(bw * m.hp / m.maxhp), 3))
         self._last_draw = now
-        self.draw_roofs(S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
+        self.draw_doors(S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
         S.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), top - (cyp % PX)))
         glow = self.glow_frames()
         for (fx, fy) in fires:                           # firelight pushes back the dark
@@ -1439,36 +1440,18 @@ class Game:
                     S.blit(surfs[f], (sx - pad, sy - pad))
         return fires
 
-    ROOFS = [(150, 68, 44), (66, 72, 90), (146, 116, 58), (74, 92, 56), (120, 52, 60)]
-
-    def draw_roofs(self, S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y):
-        """every house has a roof; the one you're standing in lifts off so you can see inside"""
+    def draw_doors(self, S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y):
+        """houses have no roofs (you see straight in); their front doors are marked so you can find the way in"""
         for zy in range(c0y, c1y + 1):
             for zx in range(c0x, c1x + 1):
-                for (x0, y0, x1, y1) in self.w.houses(zx, zy):
-                    cx_, cy_ = self.fx + 0.5, self.fy + 0.5         # how far you are from the house
-                    d = max(x0 - cx_, cx_ - (x1 + 1), y0 - cy_, cy_ - (y1 + 1), 0.0)
-                    if x0 <= self.px <= x1 and y0 <= self.py <= y1:
-                        d = -1
-                    fade = 0 if d < 0 else int(255 * min(1.0, max(0.0, (d - 0.3) / 2.0)))
-                    if not any(self.w.was_seen(x, y) for x in (x0, x1) for y in (y0, y1)) and \
-                            not self.w.was_seen((x0 + x1) // 2, (y0 + y1) // 2):
-                        continue                                   # never seen: stays in the dark
-                    X, Y = x0 * PX - cxp, y0 * PX - cyp + top
-                    w, h = (x1 - x0 + 1) * PX, (y1 - y0 + 1) * PX
-                    if X > sw or Y > top + vh or X + w < 0 or Y + h < top:
-                        continue
-                    if fade > 0:                                   # close by, it goes see-through so you see in
-                        rf = self.roof(w, h, (x0 * 31 + y0 * 17) % 997)
-                        if fade < 255:
-                            rf = rf.copy()
-                            rf.set_alpha(fade)
-                        S.blit(rf, (X - 4, Y - 6))
-                    for (dx, dy, side) in self.w.house_bits((x0, y0, x1, y1))[1]:
-                        S.blit(self.door_sprite(side), (dx * PX - cxp, dy * PX - cyp + top))
+                for rect in self.w.houses(zx, zy):
+                    for (dx, dy, side) in self.w.house_bits(rect)[1]:
+                        X, Y = dx * PX - cxp, dy * PX - cyp + top
+                        if -PX < X < sw and top - PX < Y < top + vh and self.w.was_seen(dx, dy):
+                            S.blit(self.door_sprite(side), (X, Y))
 
     def door_sprite(self, side):
-        """a front door you can see from the street, drawn over the roof's edge"""
+        """a front door you can see from the street"""
         key = ("door", side)
         if key not in self.mob_img:
             s = pygame.Surface((PX, PX), pygame.SRCALPHA)
@@ -1566,6 +1549,55 @@ class Game:
             R(light, (5, 5, P_ - 10, P_ - 10)); R(ink, (5, 5, P_ - 10, P_ - 10), 1)
             R(wood, (5, 5, P_ - 10, P_ - 10), 2)
             pygame.draw.line(b, wood, (6, 6), (P_ - 7, P_ - 7), 2); pygame.draw.line(b, wood, (P_ - 7, 6), (6, P_ - 7), 2)
+        elif code in ("f_sofa0", "f_sofa1"):                    # 70s sofa, back to the wall: brown cord
+            fab = (150, 92, 50) if var % 2 else (120, 80, 60)
+            hi = tuple(min(255, int(c * 1.18)) for c in fab)
+            r = (3, 4, P_ - 3, P_ - 8) if code == "f_sofa0" else (0, 4, P_ - 3, P_ - 8)
+            R(fab, r); R(ink, r, 1)
+            R(tuple(int(c * 0.7) for c in fab), (r[0], 4, r[2], 7))                     # the back
+            R(tuple(int(c * 0.85) for c in fab), (3 if code == "f_sofa0" else P_ - 8, 4, 5, P_ - 8))   # the arm
+            cx0 = 9 if code == "f_sofa0" else 1
+            R(hi, (cx0, 12, P_ - 11, P_ - 18))                                          # seat cushion
+            pygame.draw.line(b, fab, (cx0, 16), (cx0 + P_ - 12, 16))
+        elif code == "f_tv":                                     # wood-cased telly on legs
+            R((96, 64, 40), (5, 7, P_ - 10, P_ - 13)); R(ink, (5, 7, P_ - 10, P_ - 13), 1)
+            R((40, 50, 48), (8, 10, P_ - 18, P_ - 19)); R((70, 92, 86), (9, 11, 6, 3))
+            for k in range(2):
+                pygame.draw.circle(b, (200, 180, 120), (P_ - 9, 12 + k * 5), 1)
+            pygame.draw.line(b, (30, 30, 30), (P_ // 2, 7), (P_ // 2 - 5, 2)); pygame.draw.line(b, (30, 30, 30), (P_ // 2, 7), (P_ // 2 + 5, 2))
+        elif code == "f_ctable":                                 # smoked-glass coffee table
+            R((70, 60, 54), (6, 9, P_ - 12, P_ - 18)); R(ink, (6, 9, P_ - 12, P_ - 18), 1)
+            R((110, 104, 98), (8, 11, P_ - 16, 3))
+            pygame.draw.circle(b, (200, 120, 60), (P_ // 2 + 4, P_ // 2 + 1), 2)          # an ashtray
+        elif code == "f_fridge":
+            R((230, 228, 216), (4, 4, P_ - 8, P_ - 7)); R(ink, (4, 4, P_ - 8, P_ - 7), 1)
+            pygame.draw.line(b, (170, 168, 160), (5, 12), (P_ - 6, 12))
+            R((150, 150, 156), (P_ - 10, 14, 2, 8))
+        elif code == "f_ward":                                   # wardrobe: two doors
+            R(dark, (3, 4, P_ - 6, P_ - 8)); R(ink, (3, 4, P_ - 6, P_ - 8), 1)
+            R(wood, (4, 5, P_ // 2 - 5, P_ - 10)); R(wood, (P_ // 2 + 1, 5, P_ // 2 - 5, P_ - 10))
+            pygame.draw.circle(b, (210, 180, 110), (P_ // 2 - 3, P_ // 2), 1); pygame.draw.circle(b, (210, 180, 110), (P_ // 2 + 3, P_ // 2), 1)
+        elif code in ("f_bath0", "f_bath1"):                     # avocado bath
+            av = (150, 172, 96)
+            r = (5, 3, P_ - 10, P_ - 3) if code == "f_bath0" else (5, 0, P_ - 10, P_ - 4)
+            R(av, r); R(ink, r, 1)
+            ir = (9, 8, P_ - 18, P_ - 8) if code == "f_bath0" else (9, 0, P_ - 18, P_ - 9)
+            R((176, 196, 128), ir)
+            if code == "f_bath0":
+                R((180, 180, 186), (P_ // 2 - 2, 4, 4, 3))                                # taps
+        elif code == "f_wc":                                     # avocado toilet
+            av = (150, 172, 96)
+            R(av, (9, 4, P_ - 18, 8)); R(ink, (9, 4, P_ - 18, 8), 1)
+            pygame.draw.ellipse(b, av, (8, 11, P_ - 16, P_ - 15)); pygame.draw.ellipse(b, ink, (8, 11, P_ - 16, P_ - 15), 1)
+            pygame.draw.ellipse(b, (176, 196, 128), (11, 14, P_ - 22, P_ - 21))
+        elif code == "f_bench":                                  # workbench with a vice and tools
+            R(wood, (2, 6, P_ - 4, P_ - 12)); R(ink, (2, 6, P_ - 4, P_ - 12), 1)
+            R((90, 90, 96), (4, 8, 6, 5))
+            pygame.draw.line(b, (170, 60, 50), (14, 10), (24, 16), 2); R((120, 120, 128), (12, 18, 12, 2))
+        elif code == "f_barrel":                                 # oil drum
+            pygame.draw.circle(b, (50, 90, 130), (16, 16), 10); pygame.draw.circle(b, ink, (16, 16), 10, 1)
+            pygame.draw.circle(b, (40, 72, 104), (16, 16), 7, 1)
+            pygame.draw.circle(b, (20, 20, 22), (20, 12), 2)
         elif code == "f_sink":
             R((214, 214, 222), (4, 6, P_ - 8, P_ - 12)); R(ink, (4, 6, P_ - 8, P_ - 12), 1)
             pygame.draw.ellipse(b, (150, 160, 172), (8, 10, P_ - 16, P_ - 20))
@@ -1578,7 +1610,7 @@ class Game:
         return out
 
     def draw_furniture(self, S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y, t):
-        """the furniture in every house in view (a roof drawn later hides it from outside)"""
+        """the furniture in every house in view"""
         self.lamps = []
         for zy in range(c0y, c1y + 1):
             for zx in range(c0x, c1x + 1):
@@ -1588,7 +1620,7 @@ class Game:
                         continue
                     var = (x0 * 7 + y0 * 13) % 97
                     cx_, cy_ = self.fx + 0.5, self.fy + 0.5
-                    lit = max(x0 - cx_, cx_ - (x1 + 1), y0 - cy_, cy_ - (y1 + 1)) < 1.0   # only light a room you can see into
+                    lit = True
                     furn = self.w.house_bits(rect)[0]
                     tables = {(x, y) for x, y, c in furn if c in ("f_tab0", "f_tab1")}
                     for (x, y, c) in furn:
@@ -1611,57 +1643,6 @@ class Game:
             a = np.dstack([f * peak, f * peak * 0.78, f * peak * 0.42]).astype(np.uint8)
             self.mob_img[key] = pygame.surfarray.make_surface(a.swapaxes(0, 1))
         return self.mob_img[key]
-
-    def roof(self, w, h, seed):
-        """a hipped roof of tiles or thatch with its shadow, w x h pixels (plus overhang)"""
-        if not hasattr(self, "_roofs"):
-            self._roofs = {}
-        key = (w, h, seed)
-        if key in self._roofs:
-            return self._roofs[key]
-        rng = random.Random(seed)
-        base = self.ROOFS[seed % len(self.ROOFS)]
-        flip = h > w                                      # the ridge runs along the long side
-        W, H = (h, w) if flip else (w, h)
-        W += 8; H += 8
-        r = pygame.Surface((W, H), pygame.SRCALPHA)
-        sh = lambda k: tuple(max(0, min(255, int(c * k))) for c in base)
-        m = H // 2
-        north = [(0, 0), (W, 0), (W - m, m), (m, m)]
-        south = [(0, H), (W, H), (W - m, m), (m, m)]
-        west, east = [(0, 0), (m, m), (0, H)], [(W, 0), (W - m, m), (W, H)]
-        for poly, k in ((north, 1.1), (south, 0.72), (west, 0.92), (east, 0.6)):
-            pygame.draw.polygon(r, sh(k), poly)
-        line = sh(0.5)
-        for y in range(5, m, 6):                          # courses of tiles
-            pygame.draw.line(r, line, (y, y), (W - y, y))
-            pygame.draw.line(r, line, (y, H - y), (W - y, H - y))
-            for x in range(y + (y // 6 % 2) * 4, W - y, 8):
-                pygame.draw.line(r, line, (x, y - 5), (x, y))
-                pygame.draw.line(r, line, (x, H - y), (x, H - y + 5))
-        for x in range(5, m, 6):
-            pygame.draw.line(r, line, (x, x), (x, H - x))
-            pygame.draw.line(r, line, (W - x, x), (W - x, H - x))
-        pygame.draw.line(r, sh(1.35), (m, m), (W - m, m), 2)          # ridge
-        for a, b in (((0, 0), (m, m)), ((W, 0), (W - m, m)), ((0, H), (m, m)), ((W, H), (W - m, m))):
-            pygame.draw.line(r, sh(0.45), a, b, 2)                   # hips
-        pygame.draw.lines(r, (12, 10, 14), True, [(0, 0), (W - 1, 0), (W - 1, H - 1), (0, H - 1)], 2)
-        if W > 4 * PX and rng.random() < 0.8:                        # chimney
-            cx = int(W * rng.uniform(0.25, 0.7))
-            cy = m - 14
-            pygame.draw.rect(r, (40, 34, 38), (cx + 4, cy + 6, 12, 14))
-            pygame.draw.rect(r, (96, 80, 76), (cx, cy, 12, 16))
-            pygame.draw.rect(r, (130, 112, 104), (cx, cy, 12, 4))
-            pygame.draw.rect(r, (20, 16, 18), (cx + 3, cy + 1, 6, 2))
-        if flip:
-            r = pygame.transform.rotate(r, 90)
-        out = pygame.Surface((r.get_width() + 10, r.get_height() + 10), pygame.SRCALPHA)
-        shadow = pygame.Surface(r.get_size(), pygame.SRCALPHA)
-        shadow.fill((0, 0, 0, 110))
-        out.blit(shadow, (8, 10))
-        out.blit(r, (0, 0))
-        self._roofs[key] = out
-        return out
 
     def foot_shadow(self):
         if not hasattr(self, "_foot"):

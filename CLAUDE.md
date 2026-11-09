@@ -42,15 +42,21 @@ still uses cells). Body is a small box (BODY); walls stop one axis so you slide 
 whether you move or not. Creatures glide between squares when drawn (Game.mob_pos). `act()` is only used by --shot.
 
 ## Buildings and size
-- buildings.py: towns have real houses (not 1-cell huts), RimWorld-style inside: solid limewashed walls (hwall), windows
-  (hwin), front door facing the lane + inner doorways (hdoor), wood floor (hfloor), kitchen tiles (htile), rugs (hrug).
-  Wide/deep houses split into living room (front) + bedroom; small ones are studios. Furniture cells "f_*" (buildings.FURN:
-  2-cell bed f_bed0/1 and table f_tab0/1, chairs, armchair, end table, dresser, lamp, stove, shelf, plant, crate, sink),
-  placed so the door always reaches every free floor cell (_House.put). Never straddle zones. proto.gen_cells calls
-  buildings.town. World.houses() finds rects by their wall rings; World.house_bits() caches furniture + front doors.
-  Game.draw_furniture/furn_sprite draw it live (flat colours, outline, soft shadow); lamps give a soft glow.
-  Roofs (Game.roof) fade out as you come within ~2 cells and vanish inside; front doors are drawn over the roof.
-  Creatures can't walk through walls or furniture (mobs.NO_WALK). Old saves keep their old huts.
+- Towns are 70s Essex estates (user asked for 1970s Essex house designs, not square boxes, NO ROOFS so you see in):
+  proto.gen_cells lays out straight "street" (tarmac) roads from the square plus closes (cul-de-sacs) with turning heads,
+  reach 34 cells so a town spreads over the 3x3 zones round its square. buildings.town puts houses facing the streets
+  with front gardens; each candidate has its own rng ([base, street, side, step]) so fits never ripple.
+- buildings.py PLANS (rooms as shared-wall rects + doors D/B/+/G, front = south): L-plan bungalow, T-plan chalet
+  bungalow, link-detached house + garage, U courtyard bungalow, semi-detached pair (mirrored, garages at the ends),
+  staggered terrace of 3. oriented() turns/mirrors so the front door faces the street; houses are slid wholly inside
+  one zone. stamp(): windows on outside walls of lived-in rooms, then _furnish per room (b bed/l lounge/k kitchen/
+  d dining/w bathroom/g garage/h hall) via _House.put (door can always reach all free floor).
+  Floors: hcarpet (orange lounge), hcarpetb (avocado bedroom), hlino (check), hbath, hconc (garage), hfloor (hall);
+  gdoor = open up-and-over garage door. Furniture f_*: bed, sofa, telly, coffee table, armchair, lamp, plant, cooker,
+  sink, fridge, cupboard, dining table + chairs, wardrobe, dresser, avocado bath + toilet, workbench, boxes, oil drum.
+- Houses have no roofs and house walls don't block sight (immersion.BLOCK_SIGHT). Game.draw_doors marks front doors.
+  World.houses() finds houses by their joined walls; World.house_bits() caches furniture + outside doors.
+  Creatures don't spawn in zones with houses, can't walk through walls/furniture (mobs.NO_WALK). Old saves keep huts.
 - No face-like props (user): serpent heads, stelae, skull racks and idols were removed from scatter and layouts.
 - Character size slider: Z (or [ ]) -> Game.size (0.3..1.2, default 0.55), saved in ROOT/settings.json. Hero and
   creatures scale from their feet; collision body scales a bit too.

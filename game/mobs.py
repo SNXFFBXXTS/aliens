@@ -107,7 +107,8 @@ class Species:
         plans = ["fish", "tentacle", "blob"] if self.swims else ["legs", "wings", "blob", "tall", "tentacle", "beast"]
         self.plan = plans[r.integers(len(plans))]
         self.sprite = make_sprite(r, self.plan)
-        self.name = ADJ.get(biome, ["odd"])[r.integers(4)] + " " + NOUN[self.plan][r.integers(len(NOUN[self.plan]))]
+        adj = ADJ.get(biome, ["odd", "stray", "lost", "grey"])
+        self.name = adj[r.integers(len(adj))] + " " + NOUN[self.plan][r.integers(len(NOUN[self.plan]))]
         self.colour = COLOURS[r.integers(len(COLOURS))]
         self.temper = TEMPER[r.integers(len(TEMPER))]
         self.hp = int(r.integers(6, 15))
@@ -164,14 +165,14 @@ def spawn(best, cells, cx, cy, cs, tier, seed):
     out = []
     # most zones are quiet; further out they get busier
     want = r.choice([[0, 0, 0, 0, 1, 1, 2], [0, 0, 1, 1, 2, 2, 3], [0, 1, 1, 2, 2, 3, 4]][min(tier, 2)])
-    if np.isin(cells, ["plaza", "house"]).any():
-        want = 0                                   # nothing nasty wanders round town
+    if np.isin(cells, ["plaza", "house", "hwall", "hdoor"]).any():
+        want = 0                                   # nothing nasty wanders round town (or its houses)
     for k in range(int(want) * 6):
         if len(out) >= want:
             break
         x, y = int(r.integers(cs)), int(r.integers(cs))
         b = str(cells[y, x])
-        if b in ("plaza", "house", "bridge") or b in NO_WALK:
+        if b in ("plaza", "house", "bridge", "road") or b in NO_WALK or b.startswith(("h", "f_", "p_")) and b not in ADJ:
             continue
         key = "water" if b in WATER else b
         n = int(r.integers(3))

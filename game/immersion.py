@@ -8,7 +8,7 @@ Ambience     generated ambient loops (made once into game/sounds/), quiet crossf
 import math, os, random, struct, wave
 import numpy as np
 
-BLOCK_SIGHT = {"mountain", "peak", "house", "wall", "wwall", "ruin", "hwall"}
+BLOCK_SIGHT = {"mountain", "peak", "house", "wall", "wwall", "ruin"}   # house walls don't: you can see in
 THICK = {"forest": 8, "jungle": 6, "fungal": 7, "taiga": 9, "swamp": 10}     # max sight inside these
 
 DAY = 1000                       # turns in a day
@@ -108,8 +108,9 @@ D = {
     "trail": (["A narrow trail, worn by feet or something with more of them.", "A path winds off between the growth."],
               ["Your steps go quiet on the packed earth."], ["Dust and crushed stems."]),
     "road": (["A worn road, rutted by wheels.", "Old stones mark the way."], ["Your footsteps sound loud on the packed earth."], ["Dust and dung."]),
-    "plaza": (["Domed huts crowd round a dusty square.", "Lanterns glow in round windows."], ["Murmured voices, a door creaking.", "Someone is hammering something."],
-              ["Woodsmoke and cooking.", "Bread, smoke and animals."]),
+    "plaza": (["Bungalows and semis line quiet closes round the square.", "Net curtains, pebble-dash, a garage door left up."],
+              ["A gate creaks somewhere down the close.", "Someone is hammering something in a garage."],
+              ["Woodsmoke and cut grass.", "Damp carpet and old cooking."]),
 }
 WATERY = {"shallow": "You wade into cold, knee-deep water."}
 
