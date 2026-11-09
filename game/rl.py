@@ -562,7 +562,7 @@ class Game:
 
     def slider_rect(self):
         sw, sh = self.screen.get_size()
-        return pygame.Rect(sw - 300, HUD_H + 14, 280, 70)
+        return pygame.Rect(12, HUD_H + 14, 280, 70)
 
     def draw_sizer(self):
         r = self.slider_rect()
@@ -1116,9 +1116,22 @@ class Game:
         """keys and clicks while your bag (and maybe a container) is open, Zomboid-style"""
         lists = [self.inv_list(), self.sorted_items(self.pane_inv(1)) if self.loot else []]
         p = self.pane if self.loot else 0
+        if e.type == pygame.MOUSEMOTION and getattr(self, "drag", None):
+            self.drag["pos"] = e.pos
+            return
+        if e.type == pygame.MOUSEBUTTONUP and e.button == 1 and getattr(self, "drag", None):
+            d, self.drag = self.drag, None                       # dropped: onto the other list moves it across
+            for rect, tp in getattr(self, "_panes", []):
+                if rect.collidepoint(e.pos) and tp != d["pane"] and d["key"] in self.pane_inv(d["pane"]):
+                    shift = pygame.key.get_mods() & pygame.KMOD_SHIFT
+                    self.move_item(d["pane"], d["key"], all_=not shift)
+                    self.pane = tp
+            return
         if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
             for rect, rp, i in getattr(self, "_rows", []):
                 if rect.collidepoint(e.pos):
+                    if self.loot:                                 # pick it up: drag it to the other list
+                        self.drag = {"pane": rp, "key": lists[rp][i], "pos": e.pos, "from": e.pos}
                     double = (rp, i) == getattr(self, "_last_click", (None, None))[:2] and \
                         time.monotonic() - self._last_click[2] < 0.35
                     self._last_click = (rp, i, time.monotonic())
@@ -1159,6 +1172,7 @@ class Game:
 
     def close_bag(self):
         self.show_inv = False
+        self.drag = None
         if self.loot:
             self.amb.fx("take", 0.8)
         self.loot = None
@@ -1274,7 +1288,8 @@ class Game:
             return True
         if e.type == pygame.MOUSEWHEEL and not self.show_map:
             self.set_zoom(1 if e.y > 0 else -1)
-        if (self.show_inv or self.loot) and e.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+        if (self.show_inv or self.loot) and e.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
+                                                       pygame.MOUSEMOTION):
             self.bag_input(e)                                     # the bag (and any open container) has the input
             return True
         if e.type == pygame.KEYDOWN:
@@ -1307,6 +1322,8 @@ class Game:
             elif k in (pygame.K_i, pygame.K_TAB) and not self.show_map:
                 self.show_inv = True
                 self.pane, self.sel = 0, [0, 0]
+            elif k == pygame.K_v:
+                self.show_mini = not getattr(self, "show_mini", True)
             elif k == pygame.K_z:
                 self.sizer = not self.sizer
                 if not self.sizer:
@@ -1784,28 +1801,130 @@ class Game:
         return srf
 
     def draw_map(self):
+        """the world map (M): where you've been is clear, the rest dark but faintly there; towns and you marked"""
         sw, sh = self.screen.get_size()
         m = self.w.world_map()
-        avail_w, avail_h = sw - 40, sh - HUD_H - LOG_H - 20
+        avail_w, avail_h = sw - 60, sh - HUD_H - LOG_H - 100
         k = min(avail_w / m.get_width(), avail_h / m.get_height())
         mw, mh = int(m.get_width() * k), int(m.get_height() * k)
-        ms = pygame.transform.smoothscale(m, (mw, mh))
-        fog = pygame.Surface((mw, mh), pygame.SRCALPHA)
-        fog.fill((0, 0, 0, 105))
+        key = (mw, mh, len(self.w.visited))
+        if getattr(self, "_wmap", (None,))[0] != key:          # rebuild when you've been somewhere new
+            ms = pygame.transform.smoothscale(m, (mw, mh))
+            fog = pygame.Surface((mw, mh), pygame.SRCALPHA)
+            fog.fill((4, 4, 8, 150))
+            tw, th = mw / proto.W, mh / proto.H
+            for (cx, cy) in self.w.visited:
+                pygame.draw.rect(fog, (0, 0, 0, 0), (int(cx * tw), int(cy * th), int(tw) + 1, int(th) + 1))
+            ms.blit(fog, (0, 0))
+            self._wmap = (key, ms)
+        ms = self._wmap[1]
         tw, th = mw / proto.W, mh / proto.H
-        for (cx, cy) in self.w.visited:          # places you've been show clearly
-            pygame.draw.rect(fog, (0, 0, 0, 0), (int(cx * tw), int(cy * th), int(tw) + 1, int(th) + 1))
-        ms.blit(fog, (0, 0))
-        ox, oy = (sw - mw) // 2, HUD_H + 10
-        self.screen.fill((0, 0, 0))
+        ox, oy = (sw - mw) // 2, HUD_H + 40
+        self.screen.fill((6, 6, 10))
+        self.screen.blit(self.big.render("World map", True, (240, 220, 160)), (ox, HUD_H + 8))
+        pygame.draw.rect(self.screen, (90, 82, 66), (ox - 3, oy - 3, mw + 6, mh + 6), 1)
         self.screen.blit(ms, (ox, oy))
-        if int((time.monotonic() - self.t0) * 3) % 2 == 0:
-            x, y = ox + (self.px / CS) * tw, oy + (self.py / CS) * th
-            pygame.draw.circle(self.screen, (255, 255, 255), (int(x), int(y)), max(4, int(tw * 0.5)), 2)
+        for (tx, ty) in self.w.wd.towns:                        # towns: a little house, bright if you've been
+            x, y = int(ox + (tx + 0.5) * tw), int(oy + (ty + 0.5) * th)
+            been = (tx, ty) in self.w.visited
+            col = (250, 230, 170) if been else (120, 112, 96)
+            pygame.draw.polygon(self.screen, col, [(x - 5, y), (x, y - 5), (x + 5, y)])
+            pygame.draw.rect(self.screen, col, (x - 4, y, 8, 5))
+        x, y = ox + (self.fx / CS) * tw, oy + (self.fy / CS) * th
+        pulse = 4 + 2 * abs(math.sin((time.monotonic() - self.t0) * 3))
+        pygame.draw.circle(self.screen, (255, 255, 255), (int(x), int(y)), int(pulse) + 3, 2)
+        pygame.draw.circle(self.screen, (255, 90, 70), (int(x), int(y)), 3)
         x0, y0 = ox + (self.px // CS) * tw, oy + (self.py // CS) * th
         pygame.draw.rect(self.screen, (255, 255, 255), (int(x0) - 1, int(y0) - 1, int(tw) + 3, int(th) + 3), 1)
-        hint = self.font.render("Arrows: travel one square (takes time)   M / Enter: zoom in   Bright = places you've been", True, (170, 170, 170))
-        self.screen.blit(hint, (ox, oy + mh + 4))
+        here = str(self.w.wd.biome[self.py // CS, self.px // CS])
+        info = f"You are in: {NAMES.get(here, here)}     Explored {len(self.w.visited)} squares     Towns visited " \
+               f"{sum(1 for t in self.w.wd.towns if t in self.w.visited)} / {len(self.w.wd.towns)}"
+        self.screen.blit(self.font.render(info, True, (210, 205, 195)), (ox, oy + mh + 8))
+        hint = self.small.render("Arrows: travel one square (takes time)    M / Enter / Esc: back    "
+                                 "Clear = explored, dark = not yet    house = town", True, (150, 145, 140))
+        self.screen.blit(hint, (ox, oy + mh + 30))
+
+    MINI_CELLS, MINI_PX = 64, 3                     # the minimap shows 64 x 64 squares round you, 3 px each
+
+    def code_colour(self, c):
+        """one colour per kind of square, for the maps"""
+        cc = getattr(self, "_ccol", None)
+        if cc is None:
+            cc = self._ccol = {}
+        if c not in cc:
+            fixed = {"deep": (16, 34, 80), "ocean": (22, 44, 96), "shallow": (44, 84, 140), "lake": (40, 78, 136),
+                     "river": (50, 96, 150), "bridge": (140, 110, 70), "lava": (210, 80, 30), "mountain": (112, 106, 100),
+                     "peak": (170, 168, 170), "road": (150, 122, 82), "trail": (120, 98, 70), "street": (74, 76, 86),
+                     "plaza": (126, 120, 110), "bonfire": (240, 150, 60), "house": (200, 170, 120),
+                     "hwall": (226, 222, 212), "hwin": (150, 200, 230), "hdoor": (170, 116, 64), "gdoor": (140, 140, 150),
+                     "hfloor": (132, 96, 62), "hcarpet": (176, 84, 42), "hcarpetb": (122, 142, 64), "hlino": (204, 190, 140),
+                     "hbath": (170, 204, 214), "hconc": (112, 112, 118), "htile": (150, 150, 150), "hrug": (150, 50, 50),
+                     "wall": (150, 150, 150), "wwall": (130, 96, 60), "ruin": (110, 104, 96), "floor": (96, 96, 100),
+                     "wfloor": (110, 84, 56)}
+            if c in fixed:
+                col = fixed[c]
+            elif c.startswith("f_"):
+                col = (96, 72, 50)
+            elif c.startswith("p_"):
+                col = (140, 128, 112)
+            elif c in weird.BIOMES:
+                col = tuple(int(v) for v in weird.palette(0)[weird.F(weird.BIOMES[c][0], 3)])
+            else:
+                col = (90, 90, 90)
+            cc[c] = np.array(col, np.uint8)
+        return cc[c]
+
+    def minimap(self):
+        """the squares round you that you've seen, coloured by what they are (rebuilt when you move)"""
+        N = self.MINI_CELLS
+        key = (self.px, self.py, id(self.vis))
+        if getattr(self, "_mini", (None,))[0] == key:
+            return self._mini[1]
+        x0, y0 = self.px - N // 2, self.py - N // 2
+        img = np.zeros((N, N, 3), np.uint8)
+        img[:] = (8, 8, 12)
+        for zy in range(y0 // CS, (y0 + N - 1) // CS + 1):
+            for zx in range(x0 // CS, (x0 + N - 1) // CS + 1):
+                codes, seen = self.w.codes.get((zx, zy)), self.w.seen.get((zx, zy))
+                if codes is None or seen is None:
+                    continue
+                gx0, gy0 = max(x0, zx * CS), max(y0, zy * CS)
+                gx1, gy1 = min(x0 + N, zx * CS + CS), min(y0 + N, zy * CS + CS)
+                if gx0 >= gx1 or gy0 >= gy1:
+                    continue
+                sub = codes[gy0 - zy * CS:gy1 - zy * CS, gx0 - zx * CS:gx1 - zx * CS]
+                sm = seen[gy0 - zy * CS:gy1 - zy * CS, gx0 - zx * CS:gx1 - zx * CS]
+                u, inv = np.unique(sub, return_inverse=True)
+                lut = np.array([self.code_colour(str(c)) for c in u], np.uint8)
+                col = lut[inv.reshape(sub.shape)]
+                col[~sm] = (8, 8, 12)                             # never seen: dark
+                img[gy0 - y0:gy1 - y0, gx0 - x0:gx1 - x0] = col
+        dim = np.ones((N, N), bool)                               # what you can see now is brighter
+        for (gx, gy) in self.vis:
+            i, j = gx - x0, gy - y0
+            if 0 <= i < N and 0 <= j < N:
+                dim[j, i] = False
+        img[dim] = (img[dim] * 0.6).astype(np.uint8)
+        srf = pygame.image.frombuffer(np.ascontiguousarray(img).tobytes(), (N, N), "RGB")
+        srf = pygame.transform.scale(srf, (N * self.MINI_PX, N * self.MINI_PX))
+        self._mini = (key, srf)
+        return srf
+
+    def draw_minimap(self):
+        sw, sh = self.screen.get_size()
+        m = self.minimap()
+        size = m.get_width()
+        r = pygame.Rect(sw - size - 12, HUD_H + 10, size, size)
+        pygame.draw.rect(self.screen, (10, 8, 14), r.inflate(8, 8), border_radius=4)
+        self.screen.blit(m, r.topleft)
+        pygame.draw.rect(self.screen, (110, 100, 80), r.inflate(8, 8), 1, border_radius=4)
+        c = (r.x + (self.fx - self.px + self.MINI_CELLS // 2) * self.MINI_PX + 1,
+             r.y + (self.fy - self.py + self.MINI_CELLS // 2) * self.MINI_PX + 1)
+        pygame.draw.circle(self.screen, (255, 255, 255), (int(c[0]), int(c[1])), 3)
+        fx_, fy_ = getattr(self, "facing", (0, 1))
+        pygame.draw.line(self.screen, (255, 230, 150), (int(c[0]), int(c[1])), (int(c[0] + fx_ * 7), int(c[1] + fy_ * 7)), 2)
+        lab = self.small.render("V hide   M world map", True, (150, 145, 140))
+        self.screen.blit(lab, (r.x, r.bottom + 6))
 
     def draw_hud(self):
         sw, sh = self.screen.get_size()
@@ -1834,11 +1953,13 @@ class Game:
         for n, msg in enumerate(self.msgs):
             col = (225, 225, 225) if n == len(self.msgs) - 1 else (125, 125, 135)
             self.screen.blit(self.font.render(msg, True, col), (10, sh - LOG_H + 2 + n * 19))
+        if getattr(self, "show_mini", True) and not self.show_map and not (self.show_inv or self.loot):
+            self.draw_minimap()
         if self.sizer and not self.show_map:
             self.draw_sizer()
         if self.show_inv or self.loot:
             self.draw_bag()
-        keys = self.small.render("Move: arrows/WASD   E search   I inventory   . wait   +/- zoom   Z size   M map   N sound   Esc save & quit", True, (100, 100, 110))
+        keys = self.small.render("Move: arrows/WASD   E search   I inventory   M map   V minimap   . wait   +/- zoom   Z size   N sound   Esc save & quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
 
     def item_icon(self, k):
@@ -1910,7 +2031,7 @@ class Game:
     def draw_bag(self):
         """your bag, and the open container beside it (Project Zomboid-style lists: icon, name, category, weight)"""
         sw, sh = self.screen.get_size()
-        self._rows, self._buttons = [], []
+        self._rows, self._buttons, self._panes = [], [], []
         top_, avail = HUD_H + 14, sh - HUD_H - LOG_H - 28
         panes = [(0, "Inventory", self.inv)]
         if self.loot:
@@ -1922,7 +2043,11 @@ class Game:
         heads = {"food": "Food", "drink": "Drink", "medical": "Medical", "weapon": "Weapon", "part": "Part"}
         for pi, (p, title, inv) in enumerate(panes):
             r = pygame.Rect(x0 + pi * (W + gap), top_, W, avail)
+            self._panes.append((r, p))
             active = (self.pane if self.loot else 0) == p
+            d = getattr(self, "drag", None)
+            if d and d["pane"] != p and r.collidepoint(d["pos"]):
+                active = True                                    # you're dragging over it: light it up
             panel = pygame.Surface(r.size, pygame.SRCALPHA)
             panel.fill((22, 22, 26, 238))
             self.screen.blit(panel, r.topleft)
@@ -1977,8 +2102,15 @@ class Game:
                 tt = self.small.render("Take all (T)", True, (240, 230, 200))
                 self.screen.blit(tt, tt.get_rect(center=bt.center))
                 self._buttons.append((bt, "all"))
-        help_ = ("Up/Down choose   Tab switch side   Enter move one (Shift: all)   U use   T take all   X throw away   Esc close"
+        help_ = ("Drag items across (Shift: one)   Enter move one   Tab switch side   U use   T take all   X throw away   Esc close"
                  if self.loot else "Up/Down choose   Enter use / eat / hold   X throw away   I close")
+        d = getattr(self, "drag", None)
+        if d and d["pos"] != d["from"] and d["key"] in self.pane_inv(d["pane"]):
+            ic = self.item_icon(d["key"])                        # the item under your mouse while you drag it
+            self.screen.blit(ic, (d["pos"][0] - 15, d["pos"][1] - 15))
+            n = self.pane_inv(d["pane"])[d["key"]]
+            if n > 1:
+                self.screen.blit(self.small.render(f"x{n}", True, (255, 240, 200)), (d["pos"][0] + 12, d["pos"][1] + 6))
         hs = self.small.render(help_, True, (190, 185, 175))
         hb = pygame.Rect(0, 0, hs.get_width() + 20, hs.get_height() + 6)
         hb.midtop = (sw // 2, top_ + avail + 2)
