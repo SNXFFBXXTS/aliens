@@ -73,6 +73,12 @@ BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too de
            "hwin": "A window. Grimy glass; shapes move inside, or don't."}
 
 
+def opaque(size):
+    """a plain RGB surface with no alpha channel. (On Wayland the display format has alpha, so .convert() surfaces
+    come out see-through and drew as black when zoomed.)"""
+    return pygame.Surface(size, 0, 32, (0xFF0000, 0x00FF00, 0x0000FF, 0))
+
+
 class World:
     def __init__(self, seed):
         self.seed = seed
@@ -1461,7 +1467,7 @@ class Game:
         else:
             sw, vh = int(SW / z), int(VH / z)
             if getattr(self, "_view", None) is None or self._view.get_size() != (sw, vh):
-                self._view = pygame.Surface((sw, vh)).convert()
+                self._view = opaque((sw, vh))
             S, top = self._view, 0
         now = time.monotonic()
         t = now - self.t0
@@ -1901,7 +1907,7 @@ class Game:
 
     def _zoomed(self, w, h):
         if getattr(self, "_zoomed_s", None) is None or self._zoomed_s.get_size() != (w, h):
-            self._zoomed_s = pygame.Surface((w, h)).convert()
+            self._zoomed_s = opaque((w, h))
         return self._zoomed_s
 
     def fog_tiles(self):
