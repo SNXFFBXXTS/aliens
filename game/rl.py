@@ -446,7 +446,7 @@ class Game:
         self.maxhp = self.base_hp
         self.inv, self.food, self.water, self.weapon = {}, 100.0, 100.0, None
         self.show_inv, self.searching = False, None
-        self.loot, self.pane, self.sel = None, 1, [0, 0]   # an open container (x, y, code), active pane, selections
+        self.loot, self.mode, self.picked, self.detail = None, "take", set(), None   # open container, menu state
         self.cap = 12 + self.stat["STR"] * 1.5             # how much you can carry before you slow down
         st = self.load_state()
         if st:
@@ -1066,8 +1066,7 @@ class Game:
         elif found is False:
             self.amb.fx("empty", 1.3)
         self.loot = (x, y, c)
-        self.pane = 1 if self.w.containers()[(x, y)] else 0
-        self.sel = [0, 0]
+        self.mode, self.picked, self.detail = "take", set(), None
 
     ORDER = {"food": 0, "drink": 1, "medical": 2, "weapon": 3, "part": 4}
 
@@ -1134,70 +1133,92 @@ class Game:
                 self.weapon = None
         self.say(f"You throw away the {items.ITEMS[k][0]}.")
 
+    LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    def menu_inv(self):
+        """the things the open menu is listing"""
+        if self.loot and getattr(self, "mode", "take") == "take":
+            return self.w.containers()[self.loot[:2]]
+        return self.inv
+
+    def menu_rows(self):
+        """[(kind, data, letter)]: category headings and lettered items, Stone Soup-style"""
+        inv, rows, n = self.menu_inv(), [], 0
+        last = None
+        for k in self.sorted_items(inv):
+            cat = items.ITEMS[k][1]
+            if cat != last:
+                rows.append(("head", cat, None))
+                last = cat
+            rows.append(("item", k, self.LETTERS[n] if n < len(self.LETTERS) else "?"))
+            n += 1
+        return rows
+
     def bag_input(self, e):
-        """keys and clicks while your bag (and maybe a container) is open, Zomboid-style"""
-        lists = [self.inv_list(), self.sorted_items(self.pane_inv(1)) if self.loot else []]
-        p = self.pane if self.loot else 0
-        if e.type == pygame.MOUSEMOTION and getattr(self, "drag", None):
-            self.drag["pos"] = e.pos
-            return
-        if e.type == pygame.MOUSEBUTTONUP and e.button == 1 and getattr(self, "drag", None):
-            d, self.drag = self.drag, None                       # dropped: onto the other list moves it across
-            for rect, tp in getattr(self, "_panes", []):
-                if rect.collidepoint(e.pos) and tp != d["pane"] and d["key"] in self.pane_inv(d["pane"]):
-                    shift = pygame.key.get_mods() & pygame.KMOD_SHIFT
-                    self.move_item(d["pane"], d["key"], all_=not shift)
-                    self.pane = tp
-            return
-        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
-            for rect, rp, i in getattr(self, "_rows", []):
-                if rect.collidepoint(e.pos):
-                    if self.loot:                                 # pick it up: drag it to the other list
-                        self.drag = {"pane": rp, "key": lists[rp][i], "pos": e.pos, "from": e.pos}
-                    double = (rp, i) == getattr(self, "_last_click", (None, None))[:2] and \
-                        time.monotonic() - self._last_click[2] < 0.35
-                    self._last_click = (rp, i, time.monotonic())
-                    self.pane, self.sel[rp] = rp, i
-                    if double:                                    # double-click: move it across (or use it)
-                        k = lists[rp][i]
-                        self.move_item(rp, k) if self.loot else self.use_item(k)
-                    break
-            for rect, what in getattr(self, "_buttons", []):
-                if rect.collidepoint(e.pos):
-                    self.take_all() if what == "all" else self.close_bag()
+        """keys (and clicks) while the inventory or a container's menu is up"""
+        rows = self.menu_rows()
+        by_letter = {L: k for kind, k, L in rows if kind == "item"}
+        key = None
+        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and getattr(self, "_dos_place", None):
+            cx, cy = self.dos.cell_at(e.pos, self._dos_place)
+            hit = getattr(self, "_row_at", {}).get(cy)
+            if hit and not self.detail:
+                key = next(L for L, k in by_letter.items() if k == hit)
         elif e.type == pygame.KEYDOWN:
-            k, lst = e.key, lists[p]
-            sel = min(self.sel[p], max(0, len(lst) - 1))
-            shift = pygame.key.get_mods() & pygame.KMOD_SHIFT
-            if k in (pygame.K_ESCAPE, pygame.K_i, pygame.K_TAB) and not (k == pygame.K_TAB and self.loot):
+            key = e.unicode or None
+            if e.key == pygame.K_ESCAPE:
+                key = "ESC"
+            elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                key = "ENTER"
+            elif e.key == pygame.K_TAB:
+                key = "TAB"
+        if not key:
+            return
+        if self.detail:                                          # an item's description is open
+            k = self.detail
+            kind = items.ITEMS[k][1]
+            act = {"food": "e", "drink": "q", "medical": "a", "weapon": "w"}.get(kind)
+            if key == act:
+                self.use_item(k)
+                self.detail = None
+            elif key == "d":
+                self.drop_item(k)
+                self.detail = None
+            elif key in ("ESC", "ENTER", " "):
+                self.detail = None
+            return
+        if key == "ESC" or (key == "i" and not self.loot):
+            self.close_bag()
+        elif not self.loot:                                      # the inventory: a letter opens that item
+            if key in by_letter:
+                self.detail = by_letter[key]
+        elif key == "TAB":                                       # switch between taking and putting
+            self.mode = "put" if self.mode == "take" else "take"
+            self.picked = set()
+        elif key in by_letter:
+            k = by_letter[key]
+            self.picked ^= {k}
+            self.amb.fx("take", 0.5)
+        elif key in (",", "*"):
+            self.picked = set(by_letter.values())
+        elif key == "-":
+            self.picked = set()
+        elif key == "ENTER" and self.picked:
+            p = 1 if self.mode == "take" else 0                   # take moves box -> bag; put moves bag -> box
+            for k in list(self.picked):
+                if k in self.pane_inv(p):
+                    self.move_item(p, k, all_=True)
+            moved = len(self.picked)
+            self.picked = set()
+            self.say(("You take " if p == 1 else "You put away ") + f"{moved} thing{'s' if moved > 1 else ''}.")
+            if p == 1 and not self.w.containers()[self.loot[:2]]:
                 self.close_bag()
-            elif k in (pygame.K_TAB, pygame.K_LEFT, pygame.K_RIGHT, pygame.K_a) and self.loot and k != pygame.K_a:
-                self.pane = 1 - self.pane
-            elif k in (pygame.K_UP, pygame.K_w, pygame.K_k) and lst:
-                self.sel[p] = (sel - 1) % len(lst)
-            elif k in (pygame.K_DOWN, pygame.K_s, pygame.K_j) and lst:
-                self.sel[p] = (sel + 1) % len(lst)
-            elif k in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE, pygame.K_e) and lst:
-                if self.loot:
-                    self.move_item(p, lst[sel], all_=bool(shift))
-                else:
-                    self.use_item(lst[sel])
-            elif k == pygame.K_u and lst and p == 0:
-                self.use_item(lst[sel])
-            elif k == pygame.K_t and self.loot:
-                self.take_all()
-            elif k in (pygame.K_x, pygame.K_d, pygame.K_DELETE) and lst and p == 0:
-                self.drop_item(lst[sel])
-        for q in ((0, 1) if self.loot else (0,)):                 # keep selections on the list
-            n = len(self.inv_list() if q == 0 else self.sorted_items(self.pane_inv(1)))
-            self.sel[q] = min(self.sel[q], max(0, n - 1))
 
     def close_bag(self):
         self.show_inv = False
-        self.drag = None
         if self.loot:
             self.amb.fx("take", 0.8)
-        self.loot = None
+        self.loot, self.detail, self.picked = None, None, set()
 
     def enter(self, x, y):
         before = len(self.w.visited)
@@ -1422,8 +1443,7 @@ class Game:
             elif k in (pygame.K_e, pygame.K_SPACE) and not self.show_map:
                 self.start_search()
             elif k in (pygame.K_i, pygame.K_TAB) and not self.show_map:
-                self.show_inv = True
-                self.pane, self.sel = 0, [0, 0]
+                self.show_inv, self.detail = True, None
             elif k == pygame.K_v:
                 self.show_mini = not getattr(self, "show_mini", True)
             elif k == pygame.K_z:
@@ -2197,165 +2217,87 @@ class Game:
             self.draw_minimap()
         if self.sizer and not self.show_map:
             self.draw_sizer()
-        if self.show_inv or self.loot:
-            self.draw_bag()
+
         keys = self.small.render("Move: arrows/WASD   E search   I inventory   M map   V minimap   . wait   +/- zoom   Z size   N sound   Esc save & quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
+        if self.show_inv or self.loot:                       # the menus take over the whole screen, DOS-style
+            self.draw_menu()
 
-    def item_icon(self, k):
-        """a little drawn picture of each kind of item, Zomboid inventory-style"""
-        key = ("icon", k)
-        if key in self.mob_img:
-            return self.mob_img[key]
-        Z = 30
-        b = pygame.Surface((Z, Z), pygame.SRCALPHA)
-        col = items.ITEMS[k][3]
-        ink = (24, 20, 22)
-        dk = tuple(int(c * 0.65) for c in col)
-        lt = tuple(min(255, int(c * 1.3)) for c in col)
-        R = lambda c, r, w=0: pygame.draw.rect(b, c, r, w)
-        C = lambda c, p, rad, w=0: pygame.draw.circle(b, c, p, rad, w)
-        L = lambda c, a, z, w=1: pygame.draw.line(b, c, a, z, w)
-        if k == "beans":                                   # a tin with a label
-            R((170, 170, 178), (8, 5, 14, 20)); R(col, (8, 10, 14, 10)); R(ink, (8, 5, 14, 20), 1)
-            L((210, 210, 216), (9, 6), (20, 6))
-        elif k == "jerky":
-            pygame.draw.polygon(b, col, [(5, 20), (10, 8), (24, 6), (22, 12), (12, 22)]); pygame.draw.polygon(b, ink, [(5, 20), (10, 8), (24, 6), (22, 12), (12, 22)], 1)
-            L(dk, (9, 17), (21, 9))
-        elif k == "bread":
-            pygame.draw.ellipse(b, col, (4, 9, 22, 13)); pygame.draw.ellipse(b, ink, (4, 9, 22, 13), 1)
-            for x in (10, 15, 20):
-                L(dk, (x, 11), (x - 2, 17))
-        elif k == "fruit":
-            C(col, (15, 17), 8); C(ink, (15, 17), 8, 1); C(lt, (12, 14), 2); L((90, 60, 30), (15, 9), (17, 5), 2)
-            pygame.draw.ellipse(b, (90, 150, 70), (17, 4, 7, 4))
-        elif k in ("water", "tea"):                        # a bottle / flask
-            R(col, (10, 9, 10, 17)); R(ink, (10, 9, 10, 17), 1); R((220, 220, 226), (12, 4, 6, 5)); R(ink, (12, 4, 6, 5), 1)
-            R(lt, (12, 12, 2, 10))
-        elif k == "bandage":
-            C(col, (15, 15), 9); C(ink, (15, 15), 9, 1); C((200, 196, 186), (15, 15), 4); C(ink, (15, 15), 4, 1)
-        elif k == "medkit":
-            R(col, (5, 8, 20, 16)); R(ink, (5, 8, 20, 16), 1); R((240, 240, 240), (13, 11, 4, 10)); R((240, 240, 240), (10, 14, 10, 4))
-            R(dk, (12, 5, 6, 3))
-        elif k == "knife":
-            pygame.draw.polygon(b, col, [(6, 24), (20, 8), (23, 9), (11, 23)]); R((90, 60, 40), (3, 22, 6, 4))
-        elif k == "crowbar":
-            L(col, (8, 25), (21, 6), 3); L(col, (21, 6), (25, 8), 3); L(col, (8, 25), (5, 22), 3)
-        elif k == "pipe":
-            L(dk, (5, 24), (24, 6), 6); L(col, (5, 24), (24, 6), 4); L(lt, (6, 22), (22, 7), 1)
-        elif k == "scrap":
-            pygame.draw.polygon(b, col, [(4, 12), (14, 5), (26, 10), (22, 23), (8, 24)]); pygame.draw.polygon(b, ink, [(4, 12), (14, 5), (26, 10), (22, 23), (8, 24)], 1)
-            C(dk, (12, 13), 2); C(dk, (19, 18), 2)
-        elif k == "wire":
-            for r in (10, 7, 4):
-                C(col, (15, 15), r, 2)
-        elif k == "battery":
-            R(col, (8, 7, 14, 19)); R(ink, (8, 7, 14, 19), 1); R((200, 200, 205), (12, 4, 6, 3)); R(dk, (8, 15, 14, 4))
-        elif k == "circuit":
-            R(col, (4, 6, 22, 18)); R(ink, (4, 6, 22, 18), 1); R((30, 30, 34), (10, 11, 8, 7))
-            for x in (7, 21):
-                L((220, 190, 90), (x, 9), (x, 21))
-        elif k == "cloth":
-            R(col, (5, 10, 20, 12)); R(ink, (5, 10, 20, 12), 1); C(lt, (25, 16), 6); C(ink, (25, 16), 6, 1)
-        elif k == "rope":
-            for i, r in enumerate((11, 8, 5)):
-                C(col if i % 2 == 0 else dk, (15, 15), r, 3)
-        elif k == "fuel":
-            pygame.draw.rect(b, col, (8, 5, 14, 21), border_radius=3)
-            pygame.draw.rect(b, ink, (8, 5, 14, 21), 1, border_radius=3); R(dk, (11, 11, 8, 9)); L(ink, (15, 12), (15, 18))
-        else:
-            R(col, (7, 7, 16, 16)); R(ink, (7, 7, 16, 16), 1)
-        self.mob_img[key] = b
-        return b
-
-    def draw_bag(self):
-        """your bag, and the open container beside it (Project Zomboid-style lists: icon, name, category, weight)"""
-        sw, sh = self.screen.get_size()
-        self._rows, self._buttons, self._panes = [], [], []
-        top_, avail = HUD_H + 14, sh - HUD_H - LOG_H - 28
-        panes = [(0, "Inventory", self.inv)]
+    def draw_menu(self):
+        """the inventory / pick-up menus: a full DOS text screen, Dungeon Crawl Stone Soup-style"""
+        import dosui
+        if not hasattr(self, "dos"):
+            self.dos = dosui.Dos()
+        D = self.dos
+        D.clear()
+        inv = self.menu_inv()
+        kg_bag = items.weight(self.inv)
         if self.loot:
-            x, y, c = self.loot
-            panes.append((1, self.thing_name(c).capitalize(), self.w.containers()[(x, y)]))
-        W = 420
-        gap = 16
-        x0 = (sw - (W * len(panes) + gap * (len(panes) - 1))) // 2
-        heads = {"food": "Food", "drink": "Drink", "medical": "Medical", "weapon": "Weapon", "part": "Part"}
-        for pi, (p, title, inv) in enumerate(panes):
-            r = pygame.Rect(x0 + pi * (W + gap), top_, W, avail)
-            self._panes.append((r, p))
-            active = (self.pane if self.loot else 0) == p
-            d = getattr(self, "drag", None)
-            if d and d["pane"] != p and r.collidepoint(d["pos"]):
-                active = True                                    # you're dragging over it: light it up
-            panel = pygame.Surface(r.size, pygame.SRCALPHA)
-            panel.fill((22, 22, 26, 238))
-            self.screen.blit(panel, r.topleft)
-            pygame.draw.rect(self.screen, (120, 110, 90) if active else (60, 58, 66), r, 2 if active else 1)
-            pygame.draw.rect(self.screen, (38, 36, 44), (r.x + 1, r.y + 1, W - 2, 26))       # title bar
-            self.screen.blit(self.font.render(title, True, (235, 225, 200)), (r.x + 10, r.y + 4))
-            kg = items.weight(inv)
-            wtxt = f"{kg:.1f} / {self.cap:.0f} kg" if p == 0 else f"{kg:.1f} kg"
-            t = self.small.render(wtxt, True, (230, 120, 100) if p == 0 and kg > self.cap else (170, 165, 160))
-            self.screen.blit(t, (r.right - t.get_width() - 10, r.y + 7))
-            if p == 0:                                    # how full you are
-                u = min(1.0, kg / self.cap)
-                pygame.draw.rect(self.screen, (50, 48, 56), (r.x + 10, r.y + 30, W - 20, 5))
-                pygame.draw.rect(self.screen, (200, 80, 60) if kg > self.cap else (150, 170, 110),
-                                 (r.x + 10, r.y + 30, int((W - 20) * u), 5))
-            hy = r.y + 40                                  # column headings
-            for lab, cx in (("Name", r.x + 46), ("Category", r.x + 262), ("Weight", r.right - 60)):
-                self.screen.blit(self.small.render(lab, True, (130, 126, 120)), (cx, hy))
-            pygame.draw.line(self.screen, (60, 58, 66), (r.x + 6, hy + 16), (r.right - 6, hy + 16))
-            lst = self.sorted_items(inv)
-            y = hy + 22
-            rows_fit = (r.bottom - 64 - y) // 34
-            sel = self.sel[p]
-            first = max(0, min(sel - rows_fit // 2, len(lst) - rows_fit))
-            if not lst:
-                self.screen.blit(self.font.render("Empty" if p == 1 else "Nothing yet.", True, (120, 116, 126)),
-                                 (r.x + 46, y + 6))
-            for i, k in enumerate(lst[first:first + rows_fit], start=first):
-                name, kind, kgs, col, eff = items.ITEMS[k]
-                row = pygame.Rect(r.x + 4, y, W - 8, 32)
-                if i == sel:
-                    pygame.draw.rect(self.screen, (70, 64, 50) if active else (44, 42, 50), row, border_radius=3)
-                elif i % 2:
-                    pygame.draw.rect(self.screen, (28, 28, 33), row)
-                self.screen.blit(self.item_icon(k), (r.x + 10, y + 1))
-                label = name + (f"  ({inv[k]})" if inv[k] > 1 else "") + ("  - in hand" if p == 0 and k == self.weapon else "")
-                self.screen.blit(self.font.render(label, True, (235, 230, 220)), (r.x + 46, y + 7))
-                self.screen.blit(self.small.render(heads[kind], True, (160, 155, 150)), (r.x + 262, y + 9))
-                wt = self.small.render(f"{kgs * inv[k]:.1f}", True, (160, 155, 150))
-                self.screen.blit(wt, (r.right - 22 - wt.get_width(), y + 9))
-                self._rows.append((row, p, i))
-                y += 34
-            if lst and active:                             # what the chosen thing does
-                k = lst[min(sel, len(lst) - 1)]
-                eff = items.ITEMS[k][4]
-                what = ", ".join(f"+{v} {n}" for n, v in eff.items()) or "Might be useful for building."
-                self.screen.blit(self.small.render(what, True, (190, 180, 150)), (r.x + 12, r.bottom - 52))
-            if p == 1 and lst:                             # a Take all button, as in Zomboid
-                bt = pygame.Rect(r.right - 104, r.bottom - 34, 94, 24)
-                pygame.draw.rect(self.screen, (64, 60, 48), bt, border_radius=3)
-                pygame.draw.rect(self.screen, (140, 128, 96), bt, 1, border_radius=3)
-                tt = self.small.render("Take all (T)", True, (240, 230, 200))
-                self.screen.blit(tt, tt.get_rect(center=bt.center))
-                self._buttons.append((bt, "all"))
-        help_ = ("Drag items across (Shift: one)   Enter move one   Tab switch side   U use   T take all   X throw away   Esc close"
-                 if self.loot else "Up/Down choose   Enter use / eat / hold   X throw away   I close")
-        d = getattr(self, "drag", None)
-        if d and d["pos"] != d["from"] and d["key"] in self.pane_inv(d["pane"]):
-            ic = self.item_icon(d["key"])                        # the item under your mouse while you drag it
-            self.screen.blit(ic, (d["pos"][0] - 15, d["pos"][1] - 15))
-            n = self.pane_inv(d["pane"])[d["key"]]
-            if n > 1:
-                self.screen.blit(self.small.render(f"x{n}", True, (255, 240, 200)), (d["pos"][0] + 12, d["pos"][1] + 6))
-        hs = self.small.render(help_, True, (190, 185, 175))
-        hb = pygame.Rect(0, 0, hs.get_width() + 20, hs.get_height() + 6)
-        hb.midtop = (sw // 2, top_ + avail + 2)
-        pygame.draw.rect(self.screen, (14, 12, 18), hb, border_radius=3)
-        self.screen.blit(hs, (hb.x + 10, hb.y + 3))
+            what = self.thing_name(self.loot[2])
+            if self.mode == "take":
+                D.put(1, 0, f"{what.capitalize()}", "white")
+                D.put(1, 1, "Pick up what?", "yellow")
+                D.put(16, 1, "(letters mark, ',' all, '-' none, Enter take, Tab put things in)", "dgrey")
+            else:
+                D.put(1, 0, f"Your pack", "white")
+                D.put(1, 1, f"Put what in the {what}?", "yellow")
+                D.put(25 + len(what), 1, "(letters mark, Enter put, Tab back)", "dgrey")
+        else:
+            D.put(1, 0, "Inventory", "white")
+            D.put(1, 1, "Choose something to look at it.", "yellow")
+        wcol = "lred" if kg_bag > self.cap else "grey"
+        txt = f"Pack {kg_bag:4.1f}/{self.cap:.0f} kg"
+        D.put(79 - len(txt), 0, txt, wcol)
+        rows = self.menu_rows()
+        self._row_at = {}
+        y = 3
+        if not rows:
+            D.put(3, y, "There's nothing here." if self.loot and self.mode == "take" else "You aren't carrying anything.",
+                  "dgrey")
+        for kind, k, L in rows:
+            if y > 22:
+                D.put(3, 23, "...more (keep taking to see the rest)", "dgrey")
+                break
+            if kind == "head":
+                name, sym = items.CATEGORY[k]
+                D.put(1, y, name, "lblue")
+            else:
+                g, col = items.GLYPH[k]
+                mark = "+" if k in getattr(self, "picked", set()) else "-"
+                D.put(2, y, f"{L} {mark} ", "white" if mark == "+" else "grey")
+                D.put(6, y, g, col)
+                name = items.plural(k, inv[k])
+                if k == self.weapon and inv is self.inv:
+                    name += " (in hand)"
+                D.put(8, y, name, "white" if mark == "+" else "grey")
+                wt = f"{items.ITEMS[k][2] * inv[k]:.1f} kg"
+                D.put(79 - len(wt), y, wt, "dgrey")
+                self._row_at[y] = k
+            y += 1
+        bar = "─" * 80
+        D.put(0, 24 - 1, bar, "dgrey")
+        foot = ("[a-z] mark  [,] all  [-] none  [Enter] take  [Tab] put in  [Esc] leave" if self.loot and self.mode == "take"
+                else "[a-z] mark  [Enter] put in  [Tab] take out  [Esc] leave" if self.loot
+                else "[a-z] look at an item   [Esc] close")
+        D.put(1, 24, foot, "grey")
+        if self.detail and self.detail in self.inv:            # one item, described, with what you can do
+            k = self.detail
+            name, kind, kg, _, eff = items.ITEMS[k]
+            g, col = items.GLYPH[k]
+            D.box(8, 6, 64, 13, "grey", "black", f"{g} {name}")
+            words, line, yy = items.DESC.get(k, "").split(), "", 8
+            for w_ in words:                                     # wrap the description
+                if len(line) + len(w_) + 1 > 58:
+                    D.put(11, yy, line, "grey")
+                    line, yy = "", yy + 1
+                line = (line + " " + w_).strip()
+            D.put(11, yy, line, "grey")
+            stats = ", ".join(f"+{v} {n_}" for n_, v in eff.items())
+            D.put(11, 14, (stats + "   " if stats else "") + f"{kg:.1f} kg each, you have {self.inv[k]}", "cyan")
+            act = {"food": "[e]at", "drink": "[q]uaff", "medical": "[a]pply",
+                   "weapon": "[w]ield" if self.weapon != k else "[w] put away"}.get(kind, "")
+            D.put(11, 16, f"{act}   [d]rop   [Esc] back".strip(), "yellow")
+        self._dos_place = D.blit_to(self.screen)
 
     def draw_death(self):
         sw, sh = self.screen.get_size()

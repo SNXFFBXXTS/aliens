@@ -90,3 +90,51 @@ def describe(got):
         return "nothing"
     parts = [(f"{n} x " if n > 1 else "a ") + ITEMS[i][0] for i, n in got.items()]
     return ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]
+
+
+# MS-DOS look for the menus: (symbol, VGA colour)
+GLYPH = {
+    "beans": ("%", "brown"), "jerky": ("%", "red"), "bread": ("%", "yellow"), "fruit": ("%", "lmagenta"),
+    "water": ("!", "lblue"), "tea": ("!", "brown"),
+    "bandage": ("≈", "white"), "medkit": ("♥", "lred"),
+    "knife": (")", "white"), "crowbar": (")", "red"), "pipe": (")", "grey"),
+    "scrap": ("*", "dgrey"), "wire": ("~", "yellow"), "battery": ("■", "lgreen"), "circuit": ("≡", "green"),
+    "cloth": ("░", "magenta"), "rope": ("§", "brown"), "fuel": ("♦", "yellow"),
+}
+CATEGORY = {"food": ("Comestibles", "%"), "drink": ("Drinks", "!"), "medical": ("Medicine", "♥"),
+            "weapon": ("Hand weapons", ")"), "part": ("Salvage", "*")}
+DESC = {
+    "beans": "A dented tin. The label's been peeled off and something drawn on the metal underneath.",
+    "jerky": "Dried meat. You don't ask what from.",
+    "bread": "Stale, but there's no mould on it. Nothing grows on it at all.",
+    "fruit": "It grew here. It's warm, like something alive.",
+    "water": "Clear, mostly. Boil it if you can.",
+    "tea": "Cold and bitter. Someone made it and never came back to drink it.",
+    "bandage": "Clean cloth, rolled tight.",
+    "medkit": "A colony-issue kit. Half the vials are gone; the rest are still sealed.",
+    "knife": "A kitchen knife. The edge has been kept sharp. Recently.",
+    "crowbar": "Heavy, and good for doors that were nailed shut from the inside.",
+    "pipe": "A length of pipe with a dark crust at one end.",
+    "scrap": "Bent sheet metal from the ship. It might go back where it came from.",
+    "wire": "Copper, stripped from the walls of somewhere.",
+    "battery": "Still holds a charge. It hums very faintly when you're not holding it.",
+    "circuit": "A board from the landing craft's systems. Something's scratched into the back.",
+    "cloth": "A bolt of sheeting, for bandages or patching.",
+    "rope": "Strong rope, frayed at one end as if it was cut in a hurry.",
+    "fuel": "A fuel cell. Precious. The colony would have killed for this. Maybe someone did.",
+}
+
+
+def plural(k, n):
+    """'a tin of beans' / '2 tins of beans'"""
+    name = ITEMS[k][0]
+    if n == 1:
+        return ("an " if name[0] in "aeiou" else "a ") + name
+    head, sep, tail = name.partition(" of ")
+    irregular = {"loaf": "loaves", "knife": "knives", "strip": "strips"}
+    last = head.split()[-1]
+    if last in irregular:
+        head = head[: -len(last)] + irregular[last]
+    else:
+        head = head + ("es" if head.endswith(("ch", "sh", "x", "s")) else "s")
+    return f"{n} {head}{sep}{tail}"

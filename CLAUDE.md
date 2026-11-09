@@ -64,11 +64,13 @@ whether you move or not. Creatures glide between squares when drawn (Game.mob_po
   (house furniture f_stove/f_shelf/f_dress/f_end/f_crate/f_sink, ruin props p_crate/p_barrel/p_rack/p_car/...).
   Contents come from seed + square (items.loot), so nothing is stored until searched; World.searched_set() is saved in
   the world dir (searched.json).
-- E (or Space) searches the container within reach (1 s, rummage sound); then it opens Zomboid-style: your bag and
-  the container side by side (Game.draw_bag: item icons from Game.item_icon, Name / Category / Weight columns, carry
-  weight vs Game.cap = 12 + 1.5*STR kg; over it you move at 55%). Tab switches side, Enter moves one (Shift: stack),
-  T takes all, U uses, X throws away, double-click moves. Containers keep what's left (World.containers(), saved as
-  containers.json; old searched.json read as empty). I opens the bag alone. Game is paused while either is open.
+- Menus are Dungeon Crawl Stone Soup-style on an MS-DOS text screen (dosui.Dos: 80x25 cells of 8x16 at 640x400,
+  16 VGA colours, ProggyClean pixel font for ASCII, DejaVu for symbols, box lines drawn as exact pixels, scaled up hard).
+  E on a container: "Pick up what?" (letters mark -/+, ',' all, '-' none, Enter take, Tab = "Put what in?").
+  I: inventory grouped by category (items.CATEGORY) with symbols/colours (items.GLYPH), letter opens a boxed
+  description (items.DESC) with [e]at/[q]uaff/[a]pply/[w]ield/[d]rop. Game.draw_menu / bag_input / menu_rows.
+  Containers keep what's left (World.containers(), containers.json). Carry weight vs Game.cap = 12 + 1.5*STR kg.
+  (The earlier Zomboid two-pane window with drag and drop was replaced at the user's request.)
 - Sounds (user HATED the FM/chip blips): sfx.py makes everything from noise + sines. beds(): grainy gusting wind
   (band-limited noise, gust envelopes, crackle grains) + sine whistles (pitch drift, vibrato, breath, sometimes a
   semitone dyad), per-biome mixes, faint detuned drones, tin rattles for settlements. sounds(): foley (creak, thud,
