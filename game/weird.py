@@ -1054,7 +1054,7 @@ def sway_frames(spr, m, pal, nf=8, amp=2.0, bob=False):
     n = spr.shape[0]
     pad = int(math.ceil(amp)) + 1
     ys, xs = np.nonzero(spr != ".")
-    cols = np.array([pal[m.get(ch, 0)] for ch in spr[ys, xs]], np.uint8)
+    cols = np.array([pal[m.get(ch, 0)] for ch in spr[ys, xs]], np.uint8).reshape(-1, 3)   # (a blank sprite is fine)
     lift = ((n - 1 - ys) / max(1, n - 1)) ** 1.5
     out = []
     for f in range(nf):

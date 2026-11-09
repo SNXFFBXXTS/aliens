@@ -757,9 +757,12 @@ class Game:
         day, phase, r, tint = self.clock()
         r = min(r, im.THICK.get(self.here, 99))
         self.radius = r
-        self.vis = im.fov(self.px, self.py, r, self.w.cell)   # all round you, as far as you can see
-        self.w.remember(self.vis)
-        self.dark = None
+        vkey = (self.px, self.py, r, tint)
+        if vkey != getattr(self, "_vkey", None):           # only look again if you moved or the light changed
+            self._vkey = vkey
+            self.vis = im.fov(self.px, self.py, r, self.w.cell)   # all round you, as far as you can see
+            self.w.remember(self.vis)
+            self.dark = None
         self.amb.area(self.zone_mood(), phase == "Night")
         zx, zy = self.px // CS, self.py // CS                # get the zones round you ready before you get there
         lx, ly = self.px % CS, self.py % CS
@@ -1122,7 +1125,10 @@ class Game:
         c0x, c0y = cxp // (CS * PX), cyp // (CS * PX)
         c1x, c1y = (cxp + sw) // (CS * PX), (cyp + vh) // (CS * PX)
         S.set_clip(pygame.Rect(0, top, sw, vh))
-        pal = [tuple(c) for c in weird.palette(t, getattr(self, "trip", 0))]   # colours cycle every frame
+        pk = (int(t * 12), getattr(self, "trip", 0))            # colours cycle, ~12 steps a second is plenty
+        if getattr(self, "_pal", (None,))[0] != pk:
+            self._pal = (pk, [tuple(c) for c in weird.palette(t, pk[1])])
+        pal = self._pal[1]
         here = (self.px // CS, self.py // CS)
         for cy in range(c0y, c1y + 1):
             for cx in range(c0x, c1x + 1):
@@ -1261,6 +1267,9 @@ class Game:
                     sx, sy = wx - cxp, wy - cyp + top
                     if sx < -90 or sx > sw + 10 or sy < ylo or sy > yhi:
                         continue
+                    gx_, gy_ = wx // PX, (wy + PX - 1) // PX
+                    if not self.w.was_seen(gx_, gy_) and not self.w.was_seen(gx_, gy_ - 1):
+                        continue                                    # still in the dark: nothing to draw
                     if kind == "fire":
                         S.blit(self.fire_surfs[int(t * 9 + (wx * 7 + wy * 3) % 6) % 6], (sx, sy))
                         if (wx // PX, wy // PX) in self.vis:
@@ -1506,23 +1515,35 @@ class Game:
     def darkness(self, cxp, cyp, sw, vh):
         """black where you've never looked, dim where you remember, a soft falloff and the time-of-day tint where you see"""
         x0, y0 = cxp // PX, cyp // PX
-        key = (x0, y0, sw, vh, self.turn, self.px, self.py)
+        _, _, _, tint = self.clock()
+        key = (x0, y0, sw, vh, self.px, self.py, self.radius, tuple(tint), id(self.vis))
         if self.dark and self.dark[0] == key:
             return self.dark[1]
         cols, rows = sw // PX + 2, vh // PX + 2
-        _, _, _, tint = self.clock()
         a = np.zeros((rows, cols, 4), np.uint8)
+        a[..., 3] = 255                                          # never seen: black
+        seen = np.zeros((rows, cols), bool)                      # remembered: copy from each zone's memory
+        for zy in range(y0 // CS, (y0 + rows - 1) // CS + 1):
+            for zx in range(x0 // CS, (x0 + cols - 1) // CS + 1):
+                m = self.w.seen.get((zx, zy))
+                if m is None:
+                    continue
+                gx0, gy0 = max(x0, zx * CS), max(y0, zy * CS)
+                gx1, gy1 = min(x0 + cols, zx * CS + CS), min(y0 + rows, zy * CS + CS)
+                if gx0 < gx1 and gy0 < gy1:
+                    seen[gy0 - y0:gy1 - y0, gx0 - x0:gx1 - x0] = m[gy0 - zy * CS:gy1 - zy * CS, gx0 - zx * CS:gx1 - zx * CS]
+        a[seen] = (2, 2, 8, 218)
         r = max(1, self.radius)
-        for j in range(rows):
-            for i in range(cols):
-                gx, gy = x0 + i, y0 + j
-                if (gx, gy) in self.vis:
-                    d2 = ((gx - self.px) ** 2 + (gy - self.py) ** 2) / (r * r)
-                    a[j, i] = (tint[0], tint[1], tint[2], min(235, int(tint[3] + d2 * 120)))
-                elif self.w.was_seen(gx, gy):
-                    a[j, i] = (2, 2, 8, 218)
-                else:
-                    a[j, i] = (0, 0, 0, 255)
+        if getattr(self, "_vis_arr", (None,))[0] is not self.vis:
+            v = np.array(list(self.vis), np.int64).reshape(-1, 2)
+            self._vis_arr = (self.vis, v[:, 0], v[:, 1])
+        _, vx, vy = self._vis_arr
+        i, j = vx - x0, vy - y0                                  # where you can see: tint, fading with distance
+        on = (i >= 0) & (i < cols) & (j >= 0) & (j < rows)
+        i, j = i[on], j[on]
+        d2 = ((vx[on] - self.px) ** 2 + (vy[on] - self.py) ** 2) / (r * r)
+        a[j, i, 0], a[j, i, 1], a[j, i, 2] = tint[0], tint[1], tint[2]
+        a[j, i, 3] = np.minimum(235, (tint[3] + d2 * 120).astype(np.int64))
         srf = pygame.image.frombuffer(a.tobytes(), (cols, rows), "RGBA")
         srf = pygame.transform.smoothscale(srf, (cols * PX, rows * PX)).convert_alpha()   # soft edges; display format = fast
         self.dark = (key, srf)
