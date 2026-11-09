@@ -100,7 +100,10 @@ scout head is out you see from the head (Game.update_head swaps self.vis). F = t
 (Game._cam maps screen->cells). Game.damage_mob is the one place creatures get hurt/killed; Game.mob_fx holds stun/poison.
 10 "Severed" classes (Head Thrower, Ember Saint, Frost Widow, Storm Oracle, Rot Priest, Gate Warden, Chain Monk,
 Bell Ringer, Watcher, Bone Twin); older archetypes get heads.default_head(look). character.json stores "head".
-Selection screen: H demos the head on the dummy. Creatures got a light rim + lifted colours (they vanished in the
+The head ALWAYS comes off (user): spit powers pop it forward to spit then it flies back (head_out kind
+"spit"), the scream lifts it off and shakes it (kind "scream"); hats go with the head. Selection screen: H demos the
+head on the dummy, and a TUTORIAL box plays real footage of the power (assets/tutorials/<power>.jpg filmstrips, made by
+game/tools/make_tutorials.py: re-run it whenever powers change) with heads.TUTORIAL steps. Creatures got a light rim + lifted colours (they vanished in the
 sickly palette). Demo recorder: game/out/demo/record.py -> heads.mp4.
 
 ## Performance notes

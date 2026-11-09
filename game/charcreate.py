@@ -270,6 +270,47 @@ def draw_head(screen, cx, cy, size, ch, skin, tilt=0):
     blit_rot(screen, glyph(ch, size, tuple(skin)), cx, cy, tilt)
 
 
+_TUT = {}
+TUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "tutorials")
+
+
+def tutorial_frames(power, fw=208, fh=130):
+    """the recorded clip of a head power (tools/make_tutorials.py), as a list of frames; [] if it's missing"""
+    if power not in _TUT:
+        try:
+            strip = pygame.image.load(os.path.join(TUT_DIR, power + ".jpg")).convert()
+            _TUT[power] = [strip.subsurface((k * fw, 0, fw, fh)) for k in range(strip.get_width() // fw)]
+        except (pygame.error, FileNotFoundError):
+            _TUT[power] = []
+    return _TUT[power]
+
+
+def draw_tutorial(screen, power, accent, t, mid, tiny):
+    """a looping clip of the power in the real game, with numbered steps beside it"""
+    x0, y0, w, h = 340, 632, 512, 142
+    pygame.draw.rect(screen, (18, 16, 26), (x0, y0, w, h), border_radius=8)
+    pygame.draw.rect(screen, accent, (x0, y0, 3, h), border_radius=2)
+    frames = tutorial_frames(power)
+    if frames:
+        f = frames[int(t * 15) % len(frames)]
+        screen.blit(f, (x0 + 8, y0 + 6))
+        pygame.draw.rect(screen, (60, 56, 70), (x0 + 8, y0 + 6, f.get_width(), f.get_height()), 1)
+        if int(t * 2) % 2 == 0:                               # a little REC light, it's real footage
+            pygame.draw.circle(screen, (220, 50, 50), (x0 + 20, y0 + 18), 4)
+    P = heads.POWERS[power]
+    tx = x0 + 228
+    screen.blit(tiny.render("TUTORIAL", True, (130, 128, 140)), (tx, y0 + 6))
+    screen.blit(mid.render(P["name"], True, accent), (tx, y0 + 20))
+    y = y0 + 48
+    for n, step in enumerate(heads.TUTORIAL[power], 1):
+        lines = wrap(tiny, step, w - 236 - 22)
+        screen.blit(tiny.render(f"{n}.", True, accent), (tx, y))
+        for ln in lines:
+            screen.blit(tiny.render(ln, True, (205, 202, 214)), (tx + 16, y))
+            y += 16
+        y += 3
+
+
 def blit_rot(screen, surf, cx, cy, ang):
     if ang:
         surf = pygame.transform.rotate(surf, ang)
@@ -312,7 +353,7 @@ def draw_char(screen, cx, cy, size, body, look, skin, mut=None, pose=None, head=
         hxh, hyh = bx - int(math.sin(rad) * h * 0.5), by - int(h * 0.5)
         draw_head(screen, hxh, hyh, hs, head, skin, tilt)
         lift = int(hs * 0.62)
-    if hat:
+    if hat and head != "":                                     # (no head, no hat: it went with the head)
         hg = glyph(HATS[hat][0], gs, trim if hat in ("goggles", "circlet", "visor", "crown") else coat)
         hx, hy = bx + int(math.sin(rad) * h * 0.55) * -1, by - int(h * 0.52) - lift
         blit_rot(screen, hg, hx, hy, tilt)
@@ -637,7 +678,7 @@ def run(screen, root, shot=None, setup=None):
         if hu is not None and hu >= 1:
             headfx, hu = None, None
         pw = hd["power"]
-        away = hu is not None and pw in ("boomerang", "shield", "spin", "scout")
+        away = hu is not None and (pw in ("boomerang", "shield", "spin", "scout") or hu < 0.75)   # it always comes off
         draw_char(screen, cx, cy, 200, body, look, skin, mut, pose, head="" if away else hd["glyph"])
         if hu is not None:
             hx0, hy0 = cx + int(pose.get("dx", 0)), cy - 125
@@ -648,12 +689,16 @@ def run(screen, root, shot=None, setup=None):
                 draw_head(screen, int(hx), int(hy), 88, hd["glyph"], skin, hu * 1440)
                 if abs(hu - 0.5) < 0.03 and (not hits or hits[-1][2] != (headfx, "bm")):
                     hits.append((now, "head", (headfx, "bm")))
-            elif pw in ("fire", "frost", "storm", "rot"):      # it spits a character at the dummy
-                v = min(1.0, hu / 0.45)
-                if hu < 0.45:
-                    px_ = hx0 + (dummy_x - hx0) * v
-                    blit_rot(screen, glyph(P["glyph"], 70, P["col"]), int(px_), int(hy0 + 40 * v + 60 * v * v), hu * 400)
-                elif not hits or hits[-1][2] != (headfx, "spit"):
+            elif pw in ("fire", "frost", "storm", "rot"):      # the head pops off, spits at the dummy, flies back on
+                out_ = min(1.0, hu / 0.12) if hu < 0.5 else max(0.0, 1 - (hu - 0.5) / 0.25)
+                shx, shy = hx0 + 100 * out_, hy0 - 30 * math.sin(out_ * math.pi / 2)
+                if hu < 0.75:
+                    draw_head(screen, int(shx), int(shy), 88, hd["glyph"], skin, -12 * out_)
+                v = min(1.0, max(0.0, (hu - 0.12) / 0.33))
+                if 0.12 <= hu < 0.45:
+                    px_ = hx0 + 100 + (dummy_x - hx0 - 100) * v
+                    blit_rot(screen, glyph(P["glyph"], 70, P["col"]), int(px_), int(shy + 70 * v + 60 * v * v), hu * 400)
+                elif hu >= 0.45 and (not hits or hits[-1][2] != (headfx, "spit")):
                     hits.append((now, "head", (headfx, "spit")))
                 if hu >= 0.45:
                     a_ = 1 - (hu - 0.45) / 0.55
@@ -677,11 +722,16 @@ def run(screen, root, shot=None, setup=None):
                 draw_head(screen, int(hx), int(hy), 88, hd["glyph"], skin, ang * 57)
                 if math.hypot(hx - dummy_x, hy - cy) < 80 and (not hits or now - hits[-1][0] > 0.25):
                     hits.append((now, "head", (headfx, round(hu, 2))))
-            elif pw == "nova":                                 # it screams
-                draw_head(screen, hx0 + random.randint(-4, 4), hy0 + random.randint(-4, 4), 88, hd["glyph"], skin, 0)
+            elif pw == "nova":                                 # it lifts off your shoulders and screams
+                lift_ = min(1.0, hu / 0.1) if hu < 0.6 else max(0.0, 1 - (hu - 0.6) / 0.15)
+                if hu < 0.75:
+                    draw_head(screen, hx0 + random.randint(-4, 4), int(hy0 - 90 * lift_) + random.randint(-4, 4), 88,
+                              hd["glyph"], skin, 0)
+                screen.set_clip(pygame.Rect(332, 84, 524, 540))     # the rings stay in the middle
                 for q in range(3):
-                    r_ = int(((hu * 1.6 + q * 0.18) % 1.0) * 420)
-                    pygame.draw.circle(screen, look[5], (hx0, hy0 + 60), r_, 3)
+                    r_ = int(((hu * 1.6 + q * 0.18) % 1.0) * 300)
+                    pygame.draw.circle(screen, look[5], (hx0, int(hy0 - 90 * lift_)), r_, 3)
+                screen.set_clip(None)
                 if abs(hu - 0.3) < 0.03 and (not hits or hits[-1][2] != (headfx, "nova")):
                     hits.append((now, "head", (headfx, "nova")))
             elif pw == "scout":                                # off it goes, to look
@@ -734,12 +784,7 @@ def run(screen, root, shot=None, setup=None):
         screen.blit(gl, (cx - 140, 572))
         screen.blit(small.render(f"Body {bi + 1}/20 — {BODIES[bi][1]}", True, (180, 180, 190)), (cx - 86, 582))
         screen.blit(small.render(f"Fights with: {WEAPONS[look[1]][1]}  ·  F to spar", True, (150, 150, 165)), (cx - 86, 604))
-        for i in range(20):
-            x = 352 + (i % 10) * 44
-            y = 660 + (i // 10) * 54
-            if i == bi:
-                pygame.draw.rect(screen, look[5], (x - 4, y - 6, 44, 50), 2, border_radius=6)
-            draw_char(screen, x + 18, y + 20, 28, BODIES[i][0], look, skin)
+        draw_tutorial(screen, hd["power"], look[5], t, mid, tiny)          # how their head works, in a real game
         # right panel
         rx = 880
         pygame.draw.rect(screen, (18, 16, 26), (rx - 16, 86, 400, 650), border_radius=10)

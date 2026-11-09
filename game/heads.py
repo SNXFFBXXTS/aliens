@@ -38,3 +38,36 @@ def default_head(look):
     if weapon in ("whip", "staff"):
         return {"power": "spin", "glyph": "頭"}
     return {"power": "boomerang", "glyph": "頭"}
+
+# shown on the selection screen next to a clip of the power in a real game (assets/tutorials/<power>.jpg)
+TUTORIAL = {
+    "boomerang": ["F throws your head the way you're facing; right-click aims it.",
+                  "It hits everything going out, and again coming back.",
+                  "While it's out you see from your head, not your eyes."],
+    "fire": ["F: your head pops off and spits fire; right-click aims.",
+             "The hardest single hit of any head.",
+             "It flies back onto your shoulders by itself."],
+    "frost": ["F: your head pops off and spits ice; right-click aims.",
+              "Whatever it hits is frozen in place for a while.",
+              "Freeze the fast ones, then walk away."],
+    "storm": ["F: your head pops off and spits lightning; right-click aims.",
+              "The bolt jumps to two more things nearby.",
+              "Best when they come in a group."],
+    "rot": ["F: your head pops off and spits rot; right-click aims.",
+            "A small hit that keeps hurting for five turns.",
+            "Spit, then back off and let it work."],
+    "shield": ["F: your head lifts off and circles you for 8 seconds.",
+               "It takes most of the blows meant for you.",
+               "Anything it passes gets clipped."],
+    "spin": ["F: you swing your head out on its chain.",
+             "It whirls wide round you for 4 seconds.",
+             "Walk into them while it spins."],
+    "nova": ["F: your head lifts off your shoulders and screams.",
+             "Everything within four steps is hit and stunned.",
+             "Save it for when you're surrounded."],
+    "scout": ["Right-click where you want to look (F sends it ahead).",
+              "Your head drifts there and you see what it sees.",
+              "Your body is nearly blind until it comes home."],
+}
+CLASS_FOR = {"boomerang": "Head Thrower", "fire": "Ember Saint", "frost": "Frost Widow", "storm": "Storm Oracle",
+             "rot": "Rot Priest", "shield": "Gate Warden", "spin": "Chain Monk", "nova": "Bell Ringer", "scout": "Watcher"}

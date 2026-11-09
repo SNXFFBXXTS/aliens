@@ -501,7 +501,7 @@ class Game:
 
     def hero_surface(self, left):
         """you, as your symbol with its gear, facing the way you walk"""
-        headon = self.head_out is None or self.head_out["kind"] == "nova"
+        headon = self.head_out is None
         key = ("hero", left, headon)
         if key not in self.mob_img:
             import charcreate
@@ -1274,7 +1274,7 @@ class Game:
         P = heads.POWERS[pw]
         if now < self.head_ready:
             return
-        if self.head_out and pw in ("boomerang", "scout", "shield", "spin"):
+        if self.head_out:                                       # it's already off somewhere
             return
         hx, hy = self.head_pos()
         if target:
@@ -1290,25 +1290,16 @@ class Game:
                                  dmg=dmg + max(0, self.stat["STR"] - 5) // 2)
             self.say("You throw your head.")
             self.amb.fx("equip", 1.2)
-        elif pw in ("fire", "frost", "storm", "rot"):
-            self.shots.append(dict(kind=pw, x=hx, y=hy, vx=dx * 15, vy=dy * 15, life=0.8, dmg=P["dmg"] + self.lvl - 1,
-                                   spin=0.0))
-            self.amb.fx("heal" if pw == "fire" else "equip", 1.0)
+        elif pw in ("fire", "frost", "storm", "rot"):       # the head pops off, spits, and comes back
+            self.head_out = dict(kind="spit", power=pw, x=hx, y=hy, ox=hx, oy=hy, dx=dx, dy=dy, t=0.0, fired=False,
+                                 dmg=P["dmg"] + self.lvl - 1)
         elif pw in ("shield", "spin"):
             self.head_out = dict(kind=pw, ang=math.atan2(dy, dx), t=0.0, dur=P["time"], hitcd={},
                                  x=hx, y=hy, dmg=(2 if pw == "shield" else 4) + self.lvl // 2)
             self.say("Your head lifts off and starts to circle you." if pw == "shield" else
                      "You swing your head out on its chain.")
-        elif pw == "nova":
-            self.rings.append(dict(x=hx, y=hy, t=0.0))
-            hit = 0
-            for m in list(self.w.mobs.values()):
-                if math.hypot(m.x + 0.5 - hx, m.y + 0.5 - hy) <= 4.2:
-                    self.mob_fx.setdefault(m.id, {})["stun"] = 2
-                    self.damage_mob(m, dmg, quiet=True)
-                    hit += 1
-            self.say("Your head screams." + (f" {hit} thing{'s' if hit > 1 else ''} reel{'s' if hit == 1 else ''}." if hit else ""))
-            self.amb.fx("hurt", 1.4)
+        elif pw == "nova":                                  # the head lifts off and screams
+            self.head_out = dict(kind="scream", x=hx, y=hy, t=0.0, fired=False, dmg=dmg)
         elif pw == "scout":
             tx, ty = (target if target else (hx + dx * 9, hy + dy * 9))
             d_ = math.hypot(tx - hx, ty - hy)
@@ -1316,6 +1307,17 @@ class Game:
                 tx, ty = hx + (tx - hx) / d_ * 12, hy + (ty - hy) / d_ * 12
             self.head_out = dict(kind=pw, x=hx, y=hy, tx=tx, ty=ty, t=0.0, dur=P["time"], back=False)
             self.say("Your head drifts off to look. You see what it sees.")
+
+    def scream(self, hx, hy, dmg):
+        self.rings.append(dict(x=hx, y=hy, t=0.0))
+        hit = 0
+        for m in list(self.w.mobs.values()):
+            if math.hypot(m.x + 0.5 - hx, m.y + 0.5 - hy) <= 4.2:
+                self.mob_fx.setdefault(m.id, {})["stun"] = 2
+                self.damage_mob(m, dmg, quiet=True)
+                hit += 1
+        self.say("Your head screams." + (f" {hit} thing{'s' if hit > 1 else ''} reel{'s' if hit == 1 else ''}." if hit else ""))
+        self.amb.fx("hurt", 1.4)
 
     def head_hits(self, x, y, seen, dmg, how):
         """anything at (x, y) that hasn't been hit yet by this head this pass"""
@@ -1356,6 +1358,38 @@ class Game:
                     h["x"] += dx / d * min(sp, d)
                     h["y"] += dy / d * min(sp, d)
                     self.head_hits(h["x"], h["y"], h["hit"], h["dmg"], "hit")
+            elif k == "spit":                                 # out a little way, spit, back on
+                h["t"] += dt
+                t_ = h["t"]
+                if t_ < 0.15:
+                    u = t_ / 0.15
+                    h["x"], h["y"] = h["ox"] + h["dx"] * 0.9 * u, h["oy"] + h["dy"] * 0.9 * u - 0.3 * math.sin(u * math.pi)
+                elif not h["fired"]:
+                    h["fired"] = True
+                    pw = h["power"]
+                    self.shots.append(dict(kind=pw, x=h["x"], y=h["y"], vx=h["dx"] * 15, vy=h["dy"] * 15, life=0.8,
+                                           dmg=h["dmg"], spin=0.0))
+                    self.amb.fx("heal" if pw == "fire" else "equip", 1.0)
+                elif t_ > 0.3:
+                    dx, dy = px_ - h["x"], py_ - h["y"]
+                    d = math.hypot(dx, dy)
+                    if d < 0.3 or t_ > 0.8:
+                        self.head_out = None
+                        return
+                    h["x"] += dx / d * min(12 * dt, d)
+                    h["y"] += dy / d * min(12 * dt, d)
+            elif k == "scream":                               # up off your shoulders, shaking, then back down
+                h["t"] += dt
+                t_ = h["t"]
+                lift = 0.8 * min(1.0, t_ / 0.12) * (1.0 if t_ < 0.5 else max(0.0, 1 - (t_ - 0.5) / 0.2))
+                shake = 0.08 * math.sin(t_ * 90) if 0.12 < t_ < 0.5 else 0.0
+                h["x"], h["y"] = px_ + shake, py_ - lift
+                if t_ >= 0.15 and not h["fired"]:
+                    h["fired"] = True
+                    self.scream(h["x"], h["y"], h["dmg"])
+                if t_ >= 0.7:
+                    self.head_out = None
+                    return
             elif k in ("shield", "spin"):
                 h["t"] += dt
                 rad = 1.3 if k == "shield" else 2.3
@@ -2472,7 +2506,7 @@ class Game:
             import charcreate
             P = heads.POWERS[self.headinfo["power"]]
             left_ = self.head_ready - time.monotonic()
-            state = "out" if self.head_out and self.head_out["kind"] != "nova" else \
+            state = "out" if self.head_out else \
                 (f"{left_:.1f}s" if left_ > 0 else "ready")
             col = (240, 220, 160) if state == "ready" else (150, 145, 140)
             y0 = sh - LOG_H - 30
