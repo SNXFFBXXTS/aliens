@@ -829,9 +829,9 @@ def built(p, x, y, b, r, nb=(False, False, False, False)):
             c[-2:] = F("wood", 0)
         if b == "hwin":                                    # a window: glass set in the wall, a frame round it
             c[9:23, 6:26] = F("wood", 1)
-            c[11:21, 8:24] = F("sea", 2)
+            c[11:21, 8:24] = F("ice", 1)                 # glass: a still colour (sea shades cycle and flash)
             c[11:21, 15:17] = F("wood", 1)
-            c[11:14, 9:13] = F("sea", 5)
+            c[11:14, 9:13] = F("ice", 4)
         return
     if b in ("wall", "ruin", "wwall"):
         thin = (up or down) and not (left or right)      # a wall running up the screen is seen edge-on: narrow

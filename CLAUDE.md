@@ -66,8 +66,14 @@ whether you move or not. Creatures glide between squares when drawn (Game.mob_po
   (house furniture f_stove/f_shelf/f_dress/f_end/f_crate/f_sink, ruin props p_crate/p_barrel/p_rack/p_car/...).
   Contents come from seed + square (items.loot), so nothing is stored until searched; World.searched_set() is saved in
   the world dir (searched.json).
-- E (or Space) searches the container within reach (Game.container_near; label + outline drawn over it, 1 s progress
-  bar, moving cancels). I/Tab opens the inventory (pauses): Enter uses/eats/holds a weapon, D drops.
+- E (or Space) searches the container within reach (1 s, rummage sound); then it opens Zomboid-style: your bag and
+  the container side by side (Game.draw_bag: item icons from Game.item_icon, Name / Category / Weight columns, carry
+  weight vs Game.cap = 12 + 1.5*STR kg; over it you move at 55%). Tab switches side, Enter moves one (Shift: stack),
+  T takes all, U uses, X throws away, double-click moves. Containers keep what's left (World.containers(), saved as
+  containers.json; old searched.json read as empty). I opens the bag alone. Game is paused while either is open.
+- Sounds: sfx.py is a tiny wavetable + FM synth (OSRS-style) making fx_open_wood/open_metal/rummage/found/empty/take/
+  eat/drink/heal/equip into game/sounds (immersion.SOUND_VERSION "3-fm" regenerates). Game.METAL picks clunk vs creak.
+- Window glass uses the "ice" family: "sea" shades cycle and made windows flash.
 - Food and water drain each world tick (~14 / ~9 min from full); warnings at 25 and 0; at 0 you lose HP; no healing
   unless both > 20. Held weapon adds damage. Inventory, food, water, weapon saved in player.json.
 

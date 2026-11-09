@@ -165,7 +165,7 @@ def _loopfade(x, f=2000):
     return x
 
 
-SOUND_VERSION = "2-minimal"
+SOUND_VERSION = "3-fm"
 
 
 def make_sounds():
@@ -202,6 +202,9 @@ def make_sounds():
     k = np.arange(int(RATE * 1.2))
     _write("fx_level", sum(np.sin(2 * np.pi * f * k / RATE) * (k > i * 4000) * np.exp(-np.maximum(0, k - i * 4000) / 6000)
                            for i, f in enumerate((523, 659, 784))))
+    import sfx                                         # FM / wavetable effects (searching, finding, eating...)
+    for name, x in sfx.sounds().items():
+        _write("fx_" + name, x)
     with open(os.path.join(SND_DIR, "version"), "w") as fh:
         fh.write(SOUND_VERSION)
 
