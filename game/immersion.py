@@ -17,13 +17,13 @@ DAY = 1000                       # turns in a day
 def daytime(turn):
     t = (turn + 150) % DAY        # start the game in the morning
     day = (turn + 150) // DAY + 1
-    if t < 100:
-        return day, "Dawn", 10, (90, 45, 20, 50)
+    if t < 100:                                    # it never really gets bright here
+        return day, "Dawn", 8, (40, 30, 30, 110)
     if t < 560:
-        return day, "Day", 15, (0, 0, 0, 0)
+        return day, "Day", 12, (8, 14, 10, 70)
     if t < 660:
-        return day, "Dusk", 10, (45, 12, 55, 80)
-    return day, "Night", 6, (0, 4, 22, 105)
+        return day, "Dusk", 8, (30, 10, 34, 135)
+    return day, "Night", 5, (0, 3, 12, 185)
 
 
 def fov(ox, oy, radius, cell):

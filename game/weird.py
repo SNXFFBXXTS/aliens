@@ -46,7 +46,25 @@ def ramp(d, m, b):
     return out
 
 
-BASE = {f: ramp(*map(hx, FAM_DEF[f])) for f in FAMS}
+# ── sickly: the whole world is drained, darkened and given a dirty grey-green cast. Blood, lava and the eye's yellow
+#    stay vivid (the only strong colour left); the weird plant families keep a little more, so they look diseased.
+ACCENT = {"lava", "blood", "eye"}
+WEIRDISH = {"bloom", "spore", "prism", "lumen", "witch", "bog"}
+CAST = np.array([58, 66, 50], float)
+
+
+def sicken(c, fam):
+    if fam in ACCENT:
+        return c
+    h, l, s_ = colorsys.rgb_to_hls(*(np.clip(c, 0, 255) / 255))
+    s_ *= 0.62 if fam in WEIRDISH else 0.45
+    l = l * 0.78 if l < 0.5 else 0.39 + (l - 0.5) * 0.55          # highlights pulled right down
+    h = h + (0.22 - h) * 0.10 if fam not in WEIRDISH else h        # a little toward bile-green
+    out = np.array(colorsys.hls_to_rgb(h % 1, l, s_)) * 255
+    return np.clip(out * 0.85 + CAST * 0.15 * (l * 2), 0, 255)
+
+
+BASE = {f: [sicken(c, f) for c in ramp(*map(hx, FAM_DEF[f]))] for f in FAMS}
 
 
 def F(fam, k):

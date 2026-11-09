@@ -1499,11 +1499,20 @@ class Game:
                     pygame.draw.rect(S, (230, 50, 50), (fx_ - bw // 2, by, int(bw * m.hp / m.maxhp), 3))
         self._last_draw = now
         self.draw_doors(S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
+        self.draw_fog(S, top, cxp, cyp, sw, vh, t)
         S.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), top - (cyp % PX)))
         glow = self.glow_frames()
         for (fx, fy) in fires:                           # firelight pushes back the dark
             g = glow[int(t * 7 + fx) % len(glow)]
             S.blit(g, (fx - g.get_width() // 2, fy - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
+        if self.clock()[1] in ("Dusk", "Night"):                      # the little light you carry
+            g = self.lamp_glow(False)
+            flick = 1.0 + 0.04 * math.sin(t * 13) + 0.03 * math.sin(t * 7.3)
+            gw = int(g.get_width() * flick)
+            g2 = pygame.transform.smoothscale(g, (gw, gw))
+            hx0, hy0 = int(self.fx * PX) - cxp + PX // 2, int(self.fy * PX) - cyp + top + PX // 2
+            S.blit(g2, (hx0 - gw // 2, hy0 - gw // 2), special_flags=pygame.BLEND_ADD)
+            S.blit(g2, (hx0 - gw // 2, hy0 - gw // 2), special_flags=pygame.BLEND_ADD)
         for (lx_, ly_, big) in getattr(self, "lamps", []):          # lamps light the room a little
             g = self.lamp_glow(big)
             S.blit(g, (lx_ - g.get_width() // 2, ly_ - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
@@ -1575,6 +1584,7 @@ class Game:
             scale = pygame.transform.scale if z > 1 else pygame.transform.smoothscale
             self.screen.blit(scale(S, (SW, VH)), (0, HUD_H))
         self.acid(t, now, SW, VH)
+        self.screen.blit(self.vignette(SW, VH), (0, HUD_H))      # the edges of your sight close in
         if now - self.flash.get("you", 0) < 0.2:           # red flash when you're hurt
             ov = pygame.Surface((SW, VH), pygame.SRCALPHA)
             ov.fill((200, 0, 0, 60))
@@ -1828,6 +1838,52 @@ class Game:
                         if lit and c in ("f_lamp", "f_end") and (x, y) in self.vis:
                             self.lamps.append((X + PX // 2, Y + PX // 2 - 2, c == "f_lamp"))
 
+    def fog_tiles(self):
+        """two soft, seamless fog textures (made once): blurred noise, wrapped so they tile"""
+        if not hasattr(self, "_fog"):
+            out = []
+            for k, (n, cut, col, peak) in enumerate(((128, 6, (118, 126, 112), 95), (96, 10, (90, 98, 96), 70))):
+                rng = np.random.default_rng(31 + k)
+                f = np.fft.fft2(rng.standard_normal((n, n)))
+                fy, fx = np.meshgrid(np.fft.fftfreq(n) * n, np.fft.fftfreq(n) * n, indexing="ij")
+                f *= np.exp(-(fx ** 2 + fy ** 2) / (2 * cut ** 2))       # keep only big, soft shapes
+                v = np.real(np.fft.ifft2(f))
+                v = (v - v.min()) / (v.max() - v.min() + 1e-9)
+                a = np.clip((v - 0.35) / 0.65, 0, 1) ** 1.6 * peak
+                img = np.zeros((n, n, 4), np.uint8)
+                img[..., 0], img[..., 1], img[..., 2] = col
+                img[..., 3] = a.astype(np.uint8)
+                srf = pygame.image.frombuffer(img.tobytes(), (n, n), "RGBA")
+                size = PX * (22 if k == 0 else 15)
+                out.append(pygame.transform.smoothscale(srf, (size, size)).convert_alpha())
+            self._fog = out
+        return self._fog
+
+    def draw_fog(self, S, top, cxp, cyp, sw, vh, t):
+        """fog drifting over the ground, anchored to the world (it doesn't follow you), thicker at night"""
+        phase = self.clock()[1]
+        thick = {"Night": 1.0, "Dusk": 0.85, "Dawn": 0.9}.get(phase, 0.6)
+        for k, tile in enumerate(self.fog_tiles()):
+            w, h = tile.get_size()
+            dx, dy = t * (9 if k == 0 else -14), t * (3 if k == 0 else 5)   # the wind moves it
+            ox = int(-(cxp - dx) % w) - w
+            oy = int(-(cyp - dy) % h) - h
+            tile.set_alpha(int(255 * thick))
+            for y in range(oy, vh + h, h):
+                for x in range(ox, sw + w, w):
+                    S.blit(tile, (x, y + top))
+
+    def vignette(self, w, h):
+        key = ("vig", w, h)
+        if key not in self.mob_img:
+            yy, xx = np.mgrid[0:h // 8, 0:w // 8]
+            d = np.sqrt(((xx - w / 16) / (w / 16)) ** 2 + ((yy - h / 16) / (h / 16)) ** 2)
+            a = np.zeros((h // 8, w // 8, 4), np.uint8)
+            a[..., 3] = np.clip((d - 0.55) * 300, 0, 215).astype(np.uint8)
+            self.mob_img[key] = pygame.transform.smoothscale(
+                pygame.image.frombuffer(a.tobytes(), (w // 8, h // 8), "RGBA"), (w, h)).convert_alpha()
+        return self.mob_img[key]
+
     def lamp_glow(self, big):
         key = ("lampglow", big)
         if key not in self.mob_img:
@@ -1877,7 +1933,11 @@ class Game:
         i, j = i[on], j[on]
         d2 = ((vx[on] - self.px) ** 2 + (vy[on] - self.py) ** 2) / (r * r)
         a[j, i, 0], a[j, i, 1], a[j, i, 2] = tint[0], tint[1], tint[2]
-        a[j, i, 3] = np.minimum(235, (tint[3] + d2 * 120).astype(np.int64))
+        alpha = np.minimum(235, tint[3] + d2 * 120)
+        if self.clock()[1] in ("Dusk", "Night"):                    # your little light pushes the dark back
+            near = np.sqrt((vx[on] - self.px) ** 2 + (vy[on] - self.py) ** 2)
+            alpha = alpha * (1 - 0.8 * np.clip(1 - near / 3.2, 0, 1))
+        a[j, i, 3] = alpha.astype(np.int64)
         srf = pygame.image.frombuffer(a.tobytes(), (cols, rows), "RGBA")
         srf = pygame.transform.smoothscale(srf, (cols * PX, rows * PX)).convert_alpha()   # soft edges; display format = fast
         self.dark = (key, srf)
