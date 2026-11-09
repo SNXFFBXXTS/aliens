@@ -505,7 +505,7 @@ def run(screen, root, shot=None, setup=None):
     msg, msg_t, hits = "", 0, []
     last_input = time.monotonic()
     clock = pygame.time.Clock()
-    t0 = time.monotonic()
+    t0 = time.monotonic() - ((setup or {}).get("t") or 0)      # (recordings can start part-way through)
     if setup:
         st.update(setup)
     items = [CUSTOM] + ARCH

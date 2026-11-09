@@ -119,6 +119,27 @@ class Species:
         self.sight = int(r.integers(5, 9))
 
 
+class Hollowed:
+    """the first of the changed colonists: their own body kanji gone grey and wrong, 虚 (hollow) where a head should be.
+    They hunt in packs and try to get all round you."""
+    BODIES = "人大夫立走兵"
+
+    def __init__(self, n):
+        self.biome, self.n = "hollow", n
+        self.swims, self.plan, self.sprite = False, "tall", None
+        self.glyph = self.BODIES[n % len(self.BODIES)]
+        self.head = "虚"
+        self.name = "hollowed colonist"
+        self.colour = "ash"
+        self.temper = "hostile"
+        self.hp = 24
+        self.atk = (2, 5)
+        self.defn = 0
+        self.slow = False
+        self.sight = 12
+        self.pack = True
+
+
 class Bestiary:
     def __init__(self, seed):
         self.seed = seed
@@ -127,7 +148,7 @@ class Bestiary:
     def species(self, biome, n):
         k = (biome, n)
         if k not in self.cache:
-            self.cache[k] = Species(self.seed, biome, n)
+            self.cache[k] = Hollowed(n) if biome == "hollow" else Species(self.seed, biome, n)
         return self.cache[k]
 
 
@@ -168,6 +189,15 @@ def spawn(best, cells, cx, cy, cs, tier, seed):
     want = r.choice([[0, 0, 0, 0, 1, 1, 2], [0, 0, 1, 1, 2, 2, 3], [0, 1, 1, 2, 2, 3, 4]][min(tier, 2)])
     if np.isin(cells, ["plaza", "house", "hwall", "hdoor", "sdoor", "bonfire"]).any():
         want = 0                                   # nothing nasty wanders round town (or its houses)
+    if want and r.random() < 0.35:                 # a pack of the hollowed, somewhere in the open
+        for k in range(int(r.integers(3, 6))):
+            for _ in range(10):
+                x, y = int(r.integers(cs)), int(r.integers(cs))
+                b = str(cells[y, x])
+                if b not in NO_WALK and b not in WATER and not b.startswith(("p_", "f_")) and b not in ("bridge",):
+                    out.append(Mob(best.species("hollow", int(r.integers(6))), 0, tier, cx * cs + x, cy * cs + y,
+                                   f"{cx}.{cy}.h{k}"))
+                    break
     for k in range(int(want) * 6):
         if len(out) >= want:
             break

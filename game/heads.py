@@ -20,10 +20,10 @@ POWERS = {
                   glyph="雷", col=(250, 245, 140), dmg=5),
     "rot": dict(name="Rot spit", what="A rotting character. What it hits keeps hurting.", cd=0.7, glyph="腐",
                 col=(150, 205, 90), dmg=2),
-    "shield": dict(name="Orbit ward", what="Your head circles you for a while, taking blows and clipping what's close.",
-                   cd=6.0, time=8.0),
-    "spin": dict(name="Chain whirl", what="Your head whirls round you on a chain, wide and fast.", cd=5.0, time=4.0),
-    "nova": dict(name="Scream", what="Your head screams. Everything round you is hit and stunned.", cd=5.0),
+    "shield": dict(name="Orbit ward", what="Three of your head circle you, taking blows and giving them back.",
+                   cd=4.0, time=8.0),
+    "spin": dict(name="Chain whirl", what="Your head whirls round you on a chain, wide and fast.", cd=3.5, time=4.0),
+    "nova": dict(name="Scream", what="Your head screams. Everything round you is blown back and stunned.", cd=2.5),
     "scout": dict(name="Send it off", what="Send your head ahead to look. You see what it sees.", cd=2.0, time=7.0),
 }
 

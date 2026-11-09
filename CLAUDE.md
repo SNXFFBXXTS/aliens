@@ -107,6 +107,17 @@ head on the dummy, and a TUTORIAL box plays real footage of the power (assets/tu
 game/tools/make_tutorials.py: re-run it whenever powers change) with heads.TUTORIAL steps. Creatures got a light rim + lifted colours (they vanished in the
 sickly palette). Demo recorder: game/out/demo/record.py -> heads.mp4.
 
+## Anime strength + first enemy (Nov 2026)
+User wants the head powers OP, like an anime. Game.juice (hit-stop freeze_until, screen shake, impact flash),
+Game.burst (sparks/ink particles), Game.popup (damage numbers + impact kanji: 斬 爆 凍 轟 腐 護 旋 叫 視, 滅 on kills,
+砕 on shatter), Game.knock (knockback), speed lines when a power fires, afterimage trails. Powers: boomerang x2 dmg,
+fire = a fan of 3 exploding fireballs, frost = area freeze (frozen things shatter for x2), storm chains up to 6, rot
+leaves a cloud (Game.clouds) that eats each turn, shield = three orbiting heads (90% block + reflect), spin = the
+whole chain hits, nova = 6.5-cell shockwave with knockback, scout = the head shoots eye-beams at what it sees.
+First enemy: mobs.Hollowed ("hollowed colonist": a grey body kanji with 虚 for a head, 24 hp, packs of 3-5 in the
+wilds, try to surround you and lunge; their head rolls off when they die). Bestiary.species("hollow", n).
+Tests/promo: game/out/promo/arena.py (each power vs a pack), promo.py (records the promo video).
+
 ## Performance notes
 Zoom levels 0.6-2.0 (0.5 was too slow). Fog drawn at quarter res and only in a box round your sight; zoomed view
 resized with a fast scale; darkness built at half size. ~12 ms/frame at 100%, ~25 ms at 60%.
