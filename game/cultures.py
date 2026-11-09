@@ -206,12 +206,36 @@ def p_billboard(r):
 
 
 def p_pipes(r):
+    """an old pipeline lying in the undergrowth: a round, shaded pipe with flanged joints, saddles under it,
+    a valve wheel, and sometimes a broken, hollow end"""
     c = canvas()
-    for k, y in enumerate((9, 11.5, 14)):
-        _fill(c, 0, y - 0.8, 15.9, y + 0.8, "1" if k % 2 == 0 else "2")
-        line(c, 0, y - 0.8, 15.9, y - 0.8, "3")
-    for x in np.arange(2, 15, 4.5):                                  # valves and brackets
-        disc(c, x, 7.5, 1, "3"); line(c, x, 8, x, 15.5, "2")
+    cy, rad = 11.0, 2.3
+    x1 = 15.9 if r.random() < 0.6 else r.uniform(11.5, 14)          # broken short, sometimes
+    for y in np.arange(cy - rad, cy + rad, 0.25):                    # the barrel, lit from above
+        u = (y - cy) / rad
+        ch = "3" if u < -0.6 else "2" if u > 0.4 else "1"
+        line(c, 0, y, x1, y, ch)
+    for x in np.arange(r.uniform(1, 3), x1 - 1, r.uniform(4.5, 6)):   # flanges at the joints
+        _fill(c, x, cy - rad - 0.6, x + 0.9, cy + rad + 0.6, "2")
+        line(c, x, cy - rad - 0.6, x, cy + rad + 0.6, "3")
+        for by in (cy - rad - 0.2, cy + rad + 0.2):
+            put(c, x + 0.45, by, "3")                                # bolts
+    for x in (r.uniform(2, 4), r.uniform(9, 12)):                    # saddles holding it up
+        if x < x1 - 1:
+            _fill(c, x - 0.8, cy + rad, x + 0.8, 15.6, "2")
+            line(c, x - 1.4, 15.6, x + 1.4, 15.6, "2")
+    if x1 < 15.9:                                                    # the broken end: dark and hollow
+        for y in np.arange(cy - rad + 0.4, cy + rad - 0.4, 0.25):
+            put(c, x1 - 0.3, y, "2"); put(c, x1 - 0.6, y, "2")
+        for y in np.arange(cy - rad, cy + rad, 0.6):
+            put(c, x1 + r.uniform(0, 0.8), y, "1")
+    elif r.random() < 0.7:                                           # a valve wheel on a stem
+        vx = r.uniform(5, 11)
+        line(c, vx, cy - rad, vx, 5.5, "2")
+        for a in np.linspace(0, 2 * math.pi, 40):
+            put(c, vx + 2.2 * math.cos(a), 4.2 + 1.1 * math.sin(a), "2")
+        line(c, vx - 2.2, 4.2, vx + 2.2, 4.2, "2"); line(c, vx, 3.1, vx, 5.3, "2")
+        put(c, vx - 1, 3.4, "3")
     return c
 
 
@@ -522,9 +546,9 @@ LAYOUTS = {"roman": ["roman_temple", "roman_forum", "aqueduct", "colosseum", "vi
            "alien": ["shrine_tech", "neonstrip", "mechyard", "monolith", "stones"]}
 
 # relics scattered through the land, not just in ruin sites
-SCATTER = {"roman": [("p_rcolumn", 0.006), ("p_drums", 0.005), ("p_rstatue", 0.002), ("p_amphora", 0.003), ("p_milestone", 0.002)],"aztec": [("p_pipes", 0.004), ("p_neon", 0.002), ("p_cables", 0.005)],   # no stelae or serpent heads: they read as faces
+SCATTER = {"roman": [("p_rcolumn", 0.006), ("p_drums", 0.005), ("p_rstatue", 0.002), ("p_amphora", 0.003), ("p_milestone", 0.002)],"aztec": [("p_pipes", 0.0008), ("p_neon", 0.0015), ("p_cables", 0.002)],   # no stelae or serpent heads: they read as faces
            "egypt": [("p_column", 0.008), ("p_sarcoph", 0.002), ("p_anubis", 0.002), ("p_pylon", 0.0004), ("p_mech", 0.0015)],
-           "soviet": [("p_statue", 0.0015), ("p_pylon", 0.0005), ("p_pipes", 0.004), ("p_cctv", 0.002)],
+           "soviet": [("p_statue", 0.0015), ("p_pylon", 0.0005), ("p_pipes", 0.0008), ("p_cctv", 0.002)],
            "rural": [("p_pylon", 0.0006), ("p_billboard", 0.002), ("p_silo", 0.0012), ("p_cctv", 0.0015)],
            "alien": [("p_cables", 0.005), ("p_neon", 0.003), ("p_mech", 0.002)]}
 for b, cul in CULTURE.items():

@@ -1025,8 +1025,8 @@ class Game:
         if (x, y) in self.w.containers():                 # been through it: just open it again
             self.open_loot(x, y, c)
             return
-        self.searching = (x, y, c, time.monotonic())
-        self.amb.fx("rummage", 1.6)
+        self.searching = (x, y, c, time.monotonic())       # looking is instant: open it straight away
+        self.finish_search()
 
     def finish_search(self):
         x, y, c, _ = self.searching
