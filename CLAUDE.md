@@ -91,6 +91,18 @@ whether you move or not. Creatures glide between squares when drawn (Game.mob_po
   "REEL nn" + generated title (REEL_WORDS + REEL_FORMS), the character big and flat, FM jazz sting (sfx "sting").
   main() sets it only for brand-new worlds with a character (not in --shot).
 
+## Heads (Nov 2026)
+Every character's head is a kanji drawn on top of their body glyph (charcreate.draw_head / draw_char(head=...)), and it
+comes off. heads.POWERS: boomerang (thrown, arcs back, hits on the way out and back), fire/frost/storm/rot (spits a
+kanji: burn / freeze-stun / chain lightning / poison), shield (orbits, 70% of blows land on it, clips), spin (wide fast
+chain orbit), nova (scream: hits + stuns within ~4 cells), scout (send it off; you see from it). While a boomerang or
+scout head is out you see from the head (Game.update_head swaps self.vis). F = toward facing, right-click = at mouse
+(Game._cam maps screen->cells). Game.damage_mob is the one place creatures get hurt/killed; Game.mob_fx holds stun/poison.
+10 "Severed" classes (Head Thrower, Ember Saint, Frost Widow, Storm Oracle, Rot Priest, Gate Warden, Chain Monk,
+Bell Ringer, Watcher, Bone Twin); older archetypes get heads.default_head(look). character.json stores "head".
+Selection screen: H demos the head on the dummy. Creatures got a light rim + lifted colours (they vanished in the
+sickly palette). Demo recorder: game/out/demo/record.py -> heads.mp4.
+
 ## Performance notes
 Zoom levels 0.6-2.0 (0.5 was too slow). Fog drawn at quarter res and only in a box round your sight; zoomed view
 resized with a fast scale; darkness built at half size. ~12 ms/frame at 100%, ~25 ms at 60%.

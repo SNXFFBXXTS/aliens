@@ -29,6 +29,7 @@ import immersion as im                                 # noqa: E402
 import structures                                      # noqa: E402
 import buildings                                       # noqa: E402
 import items                                           # noqa: E402
+import heads                                           # noqa: E402
 from weird_proto import world8                         # noqa: E402
 from art import P, B, T, Painter                       # noqa: E402
 
@@ -434,6 +435,8 @@ class Game:
         self.last_desc = {}
         self.mob_img = {}
         self.flash = {}                     # mob id / "you" -> time of last hit
+        self.head_out, self.head_ready, self.shots, self.rings, self.zaps = None, 0.0, [], [], []
+        self.mob_fx = {}                    # mob id -> {"stun": turns, "poison": turns}
         self.mob_pos = {}                   # mob id -> where it's drawn (eases towards its square)
         self.size = self.load_settings().get("size", 0.55)   # how big people and creatures are next to the scenery
         self.sizer = False                  # the size slider is showing
@@ -448,6 +451,8 @@ class Game:
         self.show_inv, self.searching = False, None
         self.loot, self.mode, self.picked, self.detail = None, "take", set(), None   # open container, menu state
         self.cap = 12 + self.stat["STR"] * 1.5             # how much you can carry before you slow down
+        self.headinfo = (self.char.get("head") or heads.default_head(self.char.get("look"))) if self.char else \
+            {"power": "boomerang", "glyph": "頭"}
         st = self.load_state()
         if st:
             self.lvl, self.xp, self.turn = st.get("lvl", 1), st.get("xp", 0), st.get("turn", 0)
@@ -496,12 +501,13 @@ class Game:
 
     def hero_surface(self, left):
         """you, as your symbol with its gear, facing the way you walk"""
-        key = ("hero", left)
+        headon = self.head_out is None or self.head_out["kind"] == "nova"
+        key = ("hero", left, headon)
         if key not in self.mob_img:
             import charcreate
             s = pygame.Surface((PX * 3, PX * 3), pygame.SRCALPHA)
             charcreate.draw_char(s, PX * 3 // 2, PX * 3 // 2, int(PX * 1.1), self.char["body"], self.char_look(),
-                                 tuple(self.char["skin_rgb"]), None)
+                                 tuple(self.char["skin_rgb"]), None, head=self.headinfo["glyph"] if headon else "")
             rim = pygame.mask.from_surface(s).to_surface(setcolor=(235, 230, 215, 120), unsetcolor=(0, 0, 0, 0))
             out = pygame.Surface(s.get_size(), pygame.SRCALPHA)
             for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):  # a faint light outline so you stand out
@@ -528,9 +534,17 @@ class Game:
             img[spr == "2"] = pal[weird.F(m.sp.colour, 3)]
             img[spr == "3"] = (255, 70, 60) if m.angry else (240, 240, 200)
             img[(img == 0).all(-1) & (spr != ".")] = (1, 1, 1)
+            body = spr != "."
+            img[body] = np.clip(img[body].astype(int) * 1.5 + 25, 0, 255).astype(np.uint8)   # lifted out of the gloom
             s = pygame.image.frombuffer(img.tobytes(), (T, T), "RGB").copy()
             s.set_colorkey((0, 0, 0))
-            self.mob_img[k] = pygame.transform.scale(s, (PX, PX))
+            s = pygame.transform.scale(s, (PX, PX)).convert_alpha()
+            rim = pygame.mask.from_surface(s).to_surface(setcolor=(210, 200, 190, 110), unsetcolor=(0, 0, 0, 0))
+            out = pygame.Surface((PX, PX), pygame.SRCALPHA)
+            for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):    # a faint outline so they read in the dark
+                out.blit(rim, (ox, oy))
+            out.blit(s, (0, 0))
+            self.mob_img[k] = out
         return self.mob_img[k]
 
     def start_spot(self):
@@ -727,12 +741,22 @@ class Game:
             return
         d = max(1, random.randint(2, 5) + self.lvl - 1 - m.sp.defn + (self.stat["STR"] - 5) // 2
                 + (items.ITEMS[self.weapon][4].get("dmg", 0) if self.weapon else 0))
+        self.damage_mob(m, d)
+
+    def damage_mob(self, m, d, how="hit", quiet=False):
+        """hurt a creature; kill it, give xp and level up if it dies"""
+        if m.id not in self.w.mobs:
+            return
+        if not m.angry:
+            m.angry = True
         m.hp -= d
         self.flash[m.id] = time.monotonic()
-        self.amb.fx("hit")
+        if not quiet:
+            self.amb.fx("hit")
         if m.hp <= 0:
             self.w.mobs.pop(m.id, None)
             self.w.dead.add(m.id)
+            self.mob_fx.pop(m.id, None)
             gain = 4 + m.tier * 6 + m.maxhp // 3
             self.xp += gain
             self.say(f"You kill the {m.name}. (+{gain} xp)")
@@ -744,8 +768,8 @@ class Game:
                 self.hp = self.maxhp
                 self.say(f"You feel stronger: level {self.lvl}! Fully healed.")
                 self.amb.fx("level")
-        else:
-            self.say(f"You hit the {m.name} for {d}.")
+        elif not quiet:
+            self.say(f"You {how} the {m.name} for {d}.")
 
     def end_turn(self):
         self.turn += 1
@@ -758,6 +782,16 @@ class Game:
             if not m.seen and (m.x, m.y) in self.vis:
                 m.seen = True
                 self.say(f"You see a {m.name}." + (" It looks hostile." if m.angry else ""))
+            fx = self.mob_fx.get(m.id)
+            if fx:
+                if fx.get("poison", 0) > 0:
+                    fx["poison"] -= 1
+                    self.damage_mob(m, 2, quiet=True)
+                    if m.id not in self.w.mobs:
+                        continue
+                if fx.get("stun", 0) > 0:
+                    fx["stun"] -= 1
+                    continue
             if m.sp.slow and self.turn % 2:
                 continue
             target = None
@@ -826,7 +860,8 @@ class Game:
         r = min(r, im.THICK.get(self.here, 99))
         self.radius = r
         vkey = (self.px, self.py, r, tint)
-        if vkey != getattr(self, "_vkey", None):           # only look again if you moved or the light changed
+        seeing_through_head = self.head_out is not None and self.head_out["kind"] in ("boomerang", "scout")
+        if vkey != getattr(self, "_vkey", None) and not seeing_through_head:           # only look again if you moved or the light changed
             self._vkey = vkey
             self.vis = im.fov(self.px, self.py, r, self.w.cell)   # all round you, as far as you can see
             self.w.remember(self.vis)
@@ -864,6 +899,10 @@ class Game:
         self.phase = phase
 
     def hurt_by(self, m):
+        if self.head_out and self.head_out["kind"] == "shield" and random.random() < 0.7:
+            self.say(f"Your head takes the {m.name}'s blow.")
+            self.amb.fx("hit", 0.6)
+            return
         if random.random() > 0.7 - (self.stat["AGI"] - 5) * 0.02:
             self.say(f"The {m.name} misses you.")
             return
@@ -932,6 +971,7 @@ class Game:
         if self.dead or self.show_map or self.show_inv or self.loot:
             return
         now = time.monotonic()
+        self.update_head(dt)
         if self.searching:
             if abs(self.vx) + abs(self.vy) > 1.5:
                 self.searching = None
@@ -1220,6 +1260,209 @@ class Game:
             self.amb.fx("take", 0.8)
         self.loot, self.detail, self.picked = None, None, set()
 
+    # ── your head ──
+    def head_pos(self):
+        """where your head sits on you, in cells"""
+        return self.fx + 0.5, self.fy + 0.5 - 0.55 * self.size
+
+    def use_head(self, target=None):
+        """F: toward where you face; right-click: at the mouse (target = (x, y) in cells)"""
+        if self.dead or self.show_map:
+            return
+        now = time.monotonic()
+        pw = self.headinfo["power"]
+        P = heads.POWERS[pw]
+        if now < self.head_ready:
+            return
+        if self.head_out and pw in ("boomerang", "scout", "shield", "spin"):
+            return
+        hx, hy = self.head_pos()
+        if target:
+            dx, dy = target[0] - hx, target[1] - hy
+        else:
+            dx, dy = getattr(self, "facing", (0, 1))
+        n = math.hypot(dx, dy) or 1.0
+        dx, dy = dx / n, dy / n
+        self.head_ready = now + P["cd"]
+        dmg = 3 + self.lvl + max(0, self.stat["WIT"] - 5) // 2
+        if pw == "boomerang":
+            self.head_out = dict(kind=pw, x=hx, y=hy, vx=dx * 13, vy=dy * 13, gone=0.0, back=False, hit=set(), spin=0.0,
+                                 dmg=dmg + max(0, self.stat["STR"] - 5) // 2)
+            self.say("You throw your head.")
+            self.amb.fx("equip", 1.2)
+        elif pw in ("fire", "frost", "storm", "rot"):
+            self.shots.append(dict(kind=pw, x=hx, y=hy, vx=dx * 15, vy=dy * 15, life=0.8, dmg=P["dmg"] + self.lvl - 1,
+                                   spin=0.0))
+            self.amb.fx("heal" if pw == "fire" else "equip", 1.0)
+        elif pw in ("shield", "spin"):
+            self.head_out = dict(kind=pw, ang=math.atan2(dy, dx), t=0.0, dur=P["time"], hitcd={},
+                                 x=hx, y=hy, dmg=(2 if pw == "shield" else 4) + self.lvl // 2)
+            self.say("Your head lifts off and starts to circle you." if pw == "shield" else
+                     "You swing your head out on its chain.")
+        elif pw == "nova":
+            self.rings.append(dict(x=hx, y=hy, t=0.0))
+            hit = 0
+            for m in list(self.w.mobs.values()):
+                if math.hypot(m.x + 0.5 - hx, m.y + 0.5 - hy) <= 4.2:
+                    self.mob_fx.setdefault(m.id, {})["stun"] = 2
+                    self.damage_mob(m, dmg, quiet=True)
+                    hit += 1
+            self.say("Your head screams." + (f" {hit} thing{'s' if hit > 1 else ''} reel{'s' if hit == 1 else ''}." if hit else ""))
+            self.amb.fx("hurt", 1.4)
+        elif pw == "scout":
+            tx, ty = (target if target else (hx + dx * 9, hy + dy * 9))
+            d_ = math.hypot(tx - hx, ty - hy)
+            if d_ > 12:
+                tx, ty = hx + (tx - hx) / d_ * 12, hy + (ty - hy) / d_ * 12
+            self.head_out = dict(kind=pw, x=hx, y=hy, tx=tx, ty=ty, t=0.0, dur=P["time"], back=False)
+            self.say("Your head drifts off to look. You see what it sees.")
+
+    def head_hits(self, x, y, seen, dmg, how):
+        """anything at (x, y) that hasn't been hit yet by this head this pass"""
+        m = self.w.mob_at(int(math.floor(x)), int(math.floor(y)))
+        if m and m.id not in seen:
+            seen.add(m.id)
+            self.damage_mob(m, dmg, how)
+            return m
+        return None
+
+    def update_head(self, dt):
+        """move the thrown head, spat characters, orbits and screams along"""
+        h = self.head_out
+        now = time.monotonic()
+        if h:
+            k = h["kind"]
+            px_, py_ = self.head_pos()
+            if k == "boomerang":
+                h["spin"] += dt * 900
+                if not h["back"]:
+                    h["x"] += h["vx"] * dt
+                    h["y"] += h["vy"] * dt
+                    h["gone"] += 13 * dt
+                    cell = (int(math.floor(h["x"])), int(math.floor(h["y"])))
+                    if h["gone"] > 7.5 or (self.blocked(*cell) and self.w.cell(*cell) not in ("bonfire",)):
+                        h["back"], h["hit"] = True, set()
+                    self.head_hits(h["x"], h["y"], h["hit"], h["dmg"], "hit")
+                else:
+                    dx, dy = px_ - h["x"], py_ - h["y"]
+                    d = math.hypot(dx, dy)
+                    if d < 0.6:
+                        self.head_out = None
+                        self.say("Your head comes back to you.")
+                        self._vkey = None
+                        self.update_view()
+                        return
+                    sp = 15 * dt
+                    h["x"] += dx / d * min(sp, d)
+                    h["y"] += dy / d * min(sp, d)
+                    self.head_hits(h["x"], h["y"], h["hit"], h["dmg"], "hit")
+            elif k in ("shield", "spin"):
+                h["t"] += dt
+                rad = 1.3 if k == "shield" else 2.3
+                h["ang"] += dt * (3.0 if k == "shield" else 7.0)
+                h["x"], h["y"] = px_ + math.cos(h["ang"]) * rad, py_ + 0.3 + math.sin(h["ang"]) * rad
+                m = self.w.mob_at(int(math.floor(h["x"])), int(math.floor(h["y"])))
+                if m and now - h["hitcd"].get(m.id, 0) > 0.5:
+                    h["hitcd"][m.id] = now
+                    self.damage_mob(m, h["dmg"], "clip" if k == "shield" else "smash")
+                if h["t"] >= h["dur"]:
+                    self.head_out = None
+                    self.say("Your head settles back on your shoulders.")
+            elif k == "scout":
+                h["t"] += dt
+                tx, ty = (px_, py_) if h["back"] or h["t"] > h["dur"] else (h["tx"], h["ty"])
+                dx, dy = tx - h["x"], ty - h["y"]
+                d = math.hypot(dx, dy)
+                if h["t"] > h["dur"]:
+                    h["back"] = True
+                if h["back"] and d < 0.6:
+                    self.head_out = None
+                    self.say("Your head comes home. It's seen things.")
+                    self._vkey = None
+                    self.update_view()
+                    return
+                if d > 0.05:
+                    sp = 10 * dt
+                    h["x"] += dx / d * min(sp, d)
+                    h["y"] += dy / d * min(sp, d)
+            if self.head_out and k in ("boomerang", "scout"):    # you see from your head, not your eyes
+                cell = (int(math.floor(self.head_out["x"])), int(math.floor(self.head_out["y"])))
+                if cell != getattr(self, "_headcell", None):
+                    self._headcell = cell
+                    vis = im.fov(cell[0], cell[1], 7 if k == "scout" else 5, self.w.cell)
+                    vis |= {(self.px + a, self.py + b) for a in (-1, 0, 1) for b in (-1, 0, 1)}
+                    self.vis = vis
+                    self.w.remember(vis)
+                    self.dark = None
+        for sh in list(self.shots):                          # spat characters
+            sh["x"] += sh["vx"] * dt
+            sh["y"] += sh["vy"] * dt
+            sh["life"] -= dt
+            sh["spin"] += dt * 600
+            cell = (int(math.floor(sh["x"])), int(math.floor(sh["y"])))
+            m = self.w.mob_at(*cell)
+            if m:
+                self.shots.remove(sh)
+                k = sh["kind"]
+                self.damage_mob(m, sh["dmg"], {"fire": "burn", "frost": "freeze", "storm": "shock", "rot": "rot"}[k])
+                if k == "frost" and m.id in self.w.mobs:
+                    self.mob_fx.setdefault(m.id, {})["stun"] = 4
+                if k == "rot" and m.id in self.w.mobs:
+                    self.mob_fx.setdefault(m.id, {})["poison"] = 5
+                if k == "storm":                                # it jumps to two more
+                    last = m
+                    for _ in range(2):
+                        nxt = min((o for o in self.w.mobs.values() if o is not m and o is not last and
+                                   math.hypot(o.x - last.x, o.y - last.y) < 4.5), default=None,
+                                  key=lambda o: math.hypot(o.x - last.x, o.y - last.y))
+                        if not nxt:
+                            break
+                        self.zaps.append(dict(a=(last.x + 0.5, last.y + 0.5), b=(nxt.x + 0.5, nxt.y + 0.5), t=now))
+                        self.damage_mob(nxt, max(1, sh["dmg"] - 2), "shock")
+                        last = nxt
+                self.rings.append(dict(x=cell[0] + 0.5, y=cell[1] + 0.5, t=0.0, small=True, col=heads.POWERS[k]["col"]))
+            elif sh["life"] <= 0 or (self.blocked(*cell) and self.w.cell(*cell) not in ("bonfire",)):
+                self.shots.remove(sh)
+        for r in list(self.rings):
+            r["t"] += dt
+            if r["t"] > 0.5:
+                self.rings.remove(r)
+        self.zaps = [z for z in self.zaps if now - z["t"] < 0.25]
+
+    def draw_head_things(self, S, top, cxp, cyp):
+        """the head in flight, orbiting or scouting; spat characters; screams; lightning"""
+        import charcreate
+        z_ = self.size
+        hsz = max(8, int(PX * 1.1 * z_ * 0.44))
+        to = lambda x, y: (int(x * PX) - cxp, int(y * PX) - cyp + top)
+        skin = tuple(self.char["skin_rgb"]) if self.char else (220, 200, 180)
+        h = self.head_out
+        if h:
+            X, Y = to(h["x"], h["y"])
+            if h["kind"] == "spin":                            # the chain
+                pX, pY = to(*self.head_pos())
+                pygame.draw.line(S, (130, 130, 140), (pX, pY + 6), (X, Y), 2)
+            if h["kind"] == "scout":                           # a faint ring: where it's looking
+                pygame.draw.circle(S, (70, 80, 60), (X, Y), int(PX * 2), 1)
+            ang = h.get("spin", 0) if h["kind"] == "boomerang" else (math.degrees(h.get("ang", 0)) if "ang" in h else 0)
+            charcreate.draw_head(S, X, Y, hsz + 4, self.headinfo["glyph"], skin, -ang)
+        for sh in self.shots:
+            P = heads.POWERS[sh["kind"]]
+            X, Y = to(sh["x"], sh["y"])
+            g = charcreate.glyph(P["glyph"], hsz + 6, P["col"])
+            g = pygame.transform.rotate(g, sh["spin"] % 360)
+            S.blit(g, (X - g.get_width() // 2, Y - g.get_height() // 2))
+        for r in self.rings:
+            X, Y = to(r["x"], r["y"])
+            rr = int((r["t"] / 0.5) * PX * (1.2 if r.get("small") else 4.2))
+            if rr > 2:
+                pygame.draw.circle(S, r.get("col", (230, 230, 210)), (X, Y), rr, 2)
+        for zp in self.zaps:
+            a, b = to(*zp["a"]), to(*zp["b"])
+            pts = [a] + [(a[0] + (b[0] - a[0]) * q / 4 + random.randint(-6, 6),
+                          a[1] + (b[1] - a[1]) * q / 4 + random.randint(-6, 6)) for q in (1, 2, 3)] + [b]
+            pygame.draw.lines(S, heads.POWERS["storm"]["col"], False, pts, 2)
+
     def enter(self, x, y):
         before = len(self.w.visited)
         self.px, self.py = x, y
@@ -1409,6 +1652,11 @@ class Game:
             self.dragging = False
             self.save_settings()
             return True
+        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 3 and not self.show_map and getattr(self, "_cam", None):
+            cxp, cyp, kx, ky, top = self._cam                     # aim your head at the mouse
+            wx = (e.pos[0] * kx + cxp) / PX
+            wy = ((e.pos[1] - HUD_H) * ky + cyp) / PX
+            self.use_head((wx, wy))
         if e.type == pygame.MOUSEWHEEL and not self.show_map:
             self.set_zoom(1 if e.y > 0 else -1)
         if (self.show_inv or self.loot) and e.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
@@ -1444,6 +1692,8 @@ class Game:
                 self.start_search()
             elif k in (pygame.K_i, pygame.K_TAB) and not self.show_map:
                 self.show_inv, self.detail = True, None
+            elif k == pygame.K_f and not self.show_map:
+                self.use_head()
             elif k == pygame.K_v:
                 self.show_mini = not getattr(self, "show_mini", True)
             elif k == pygame.K_z:
@@ -1494,6 +1744,7 @@ class Game:
         self.sync()
         cxp = int(self.fx * PX) + PX // 2 - sw // 2       # camera: player in the middle
         cyp = int(self.fy * PX) + PX // 2 - vh // 2
+        self._cam = (cxp, cyp, sw / SW, vh / VH, top)            # for aiming with the mouse
         S.fill((0, 0, 0))
         c0x, c0y = cxp // (CS * PX), cyp // (CS * PX)
         c1x, c1y = (cxp + sw) // (CS * PX), (cyp + vh) // (CS * PX)
@@ -1574,7 +1825,8 @@ class Game:
                 for k_ in ("dx", "wdx"):
                     pose[k_] = pose.get(k_, 0) * 0.35
                 charcreate.draw_char(tmp, d // 2, d // 2, max(4, int(PX * 1.1 * z_)), self.char["body"], self.char_look(),
-                                     tuple(self.char["skin_rgb"]), None, pose)
+                                     tuple(self.char["skin_rgb"]), None, pose,
+                                     head=self.headinfo["glyph"] if self.head_out is None else "")
                 if left:
                     tmp = pygame.transform.flip(tmp, True, False)
                 S.blit(tmp, (hx + PX // 2 - d // 2, mid - d // 2))
@@ -1598,6 +1850,7 @@ class Game:
         else:
             hs = self.sized("hero-old", self.hero)
             S.blit(hs, (hx + PX // 2 - hs.get_width() // 2, feet + 4 - hs.get_height()))
+        self.draw_head_things(S, top, cxp, cyp)
         q = self.container_near() if not (self.show_inv or self.loot) else None
         if q:                                                # what you could search, right where it is
             x, y, c = q
@@ -2215,10 +2468,23 @@ class Game:
             self.screen.blit(self.font.render(msg, True, col), (10, sh - LOG_H + 2 + n * 19))
         if getattr(self, "show_mini", True) and not self.show_map and not (self.show_inv or self.loot):
             self.draw_minimap()
+        if not self.show_map and self.char:                          # your head: what it does, and if it's ready
+            import charcreate
+            P = heads.POWERS[self.headinfo["power"]]
+            left_ = self.head_ready - time.monotonic()
+            state = "out" if self.head_out and self.head_out["kind"] != "nova" else \
+                (f"{left_:.1f}s" if left_ > 0 else "ready")
+            col = (240, 220, 160) if state == "ready" else (150, 145, 140)
+            y0 = sh - LOG_H - 30
+            bg = pygame.Surface((300, 26), pygame.SRCALPHA)
+            bg.fill((10, 8, 14, 190))
+            self.screen.blit(bg, (8, y0))
+            self.screen.blit(charcreate.glyph(self.headinfo["glyph"], 20, col), (14, y0 + 1))
+            self.screen.blit(self.font.render(f"{P['name']}   {state}   (F / right-click)", True, col), (42, y0 + 4))
         if self.sizer and not self.show_map:
             self.draw_sizer()
 
-        keys = self.small.render("Move: arrows/WASD   E search   I inventory   M map   V minimap   . wait   +/- zoom   Z size   N sound   Esc save & quit", True, (100, 100, 110))
+        keys = self.small.render("Move: arrows/WASD   F head   E search   I inventory   M map   V minimap   +/- zoom   Z size   N sound   Esc save & quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
         if self.show_inv or self.loot:                       # the menus take over the whole screen, DOS-style
             self.draw_menu()

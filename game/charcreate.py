@@ -10,6 +10,7 @@ Saves the chosen character to ~/.local/share/roguelike/character.json.
 """
 import json, math, os, random, time
 import pygame
+import heads
 
 CJK = "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc"
 UI = "/usr/share/fonts/noto/NotoSans-Regular.ttf"
@@ -68,9 +69,10 @@ BAD = [("Broke", "starts with almost no money"), ("Frail", "low health"), ("Bad 
        ("Addict", "needs a fix"), ("Night terrors", "sleeps badly"), ("Clumsy", "drops things"), ("Loud", "everything hears you")]
 
 
-def A(name, tag, blurb, stats, traits, kit, look):
+def A(name, tag, blurb, stats, traits, kit, look, head=None):
     return dict(name=name, tag=tag, blurb=blurb, stats=stats,
-                traits=[(t, ("+ " if i < 2 else "- ") + d) for i, (t, d) in enumerate(traits)], kit=kit, look=look)
+                traits=[(t, ("+ " if i < 2 else "- ") + d) for i, (t, d) in enumerate(traits)], kit=kit, look=look,
+                head=head)
 
 
 L = lambda c: dict(COLOURS)[c]
@@ -189,6 +191,47 @@ ARCH = [
     A("Undertaker", "Drift", "Buries what the bounty hunters leave behind. Plays slow jazz at the graveside, charges for encores.", (7, 4, 7, 5, 5, 4),
       [("Grave calm", "fear doesn't stick"), ("Iron gut", "eats anything"), ("Bad back", "carries less")],
       ["Spade", "Black duster", "Wide-brim hat", "Trumpet"], ("cowboy", "spade", "duster", None, L("Black"), T("Silver"))),
+    # ── the severed: their heads come off, and that's the point ──
+    A("Head Thrower", "Severed", "Their head comes off. It always comes back. Mostly. Nobody asks where it's been.", (6, 7, 5, 4, 3, 5),
+      [("Boomerang", "head flies out and back"), ("Thick neck", "takes a hit"), ("Headless", "half blind while it's out")],
+      ["Neck brace", "Rope", "Bandages"], (None, None, "pack", "scarf", L("Leather"), T("Gold")),
+      dict(power="boomerang", glyph="首")),
+    A("Ember Saint", "Severed", "Burned at a stake they didn't die on. Their head still smoulders, and spits.", (3, 5, 4, 8, 6, 4),
+      [("Ember spit", "head spits fire"), ("Warm", "doesn't feel the cold"), ("Smouldering", "things see you in the dark")],
+      ["Tinderbox", "Ash-grey robe", "Ash"], (None, "tome", "cloak", None, L("Crimson"), T("Yellow")),
+      dict(power="fire", glyph="炎")),
+    A("Frost Widow", "Severed", "Froze in the first winter with everyone she loved. Thawed. They didn't.", (3, 6, 5, 7, 4, 5),
+      [("Frost spit", "head spits ice that holds"), ("Still", "creatures notice you later"), ("Cold hands", "heals slowly")],
+      ["Veil", "Locket", "Frozen ring"], ("hood", None, "cloak", None, L("Navy"), T("White")),
+      dict(power="frost", glyph="氷")),
+    A("Storm Oracle", "Severed", "Was struck on the landing pad and heard everything at once. Their head still crackles.", (2, 6, 3, 9, 5, 6),
+      [("Storm spit", "lightning that jumps"), ("Foresight", "sees trouble coming"), ("Migraines", "powers hurt to use")],
+      ["Copper wire", "Rubber boots", "Charm"], ("circlet", "orb", None, None, L("Violet"), T("Yellow")),
+      dict(power="storm", glyph="雷")),
+    A("Rot Priest", "Severed", "Tended the sick until the sickness tended them. What their head spits doesn't stop.", (4, 4, 7, 6, 3, 5),
+      [("Rot spit", "hurts and keeps hurting"), ("Iron gut", "eats anything"), ("Reek", "everything smells you")],
+      ["Censer", "Stained robe", "Herbs"], ("hood", "staff", "cloak", None, L("Olive"), T("Green")),
+      dict(power="rot", glyph="腐")),
+    A("Gate Warden", "Severed", "Kept the colony gate for nine years. Their head still circles it, looking for the next one.", (7, 3, 8, 4, 4, 4),
+      [("Orbit ward", "head circles and blocks"), ("Steadfast", "doesn't get knocked down"), ("Slow", "walks slower")],
+      ["Riot shield", "Gate key", "Lamp"], ("helmet", "shield", None, "vest", L("Ash"), T("Silver")),
+      dict(power="shield", glyph="盾")),
+    A("Chain Monk", "Severed", "Took a vow, then a chain, then their own head to swing on it. The vow was about letting go.", (6, 8, 6, 5, 3, 3),
+      [("Chain whirl", "head whirls wide"), ("Flow", "dodges more"), ("Outcast", "towns don't trust you")],
+      ["Chain", "Prayer beads", "Wraps"], ("bandana", "whip", None, "beads", L("Orange"), T("Gold")),
+      dict(power="spin", glyph="鎖")),
+    A("Bell Ringer", "Severed", "Rang the warning bell the night they came. Never stopped. Their head is the bell now.", (5, 5, 6, 5, 5, 5),
+      [("Scream", "head stuns all round you"), ("Loud", "everything hears you"), ("Deafened", "can't hear what's coming")],
+      ["Bell rope", "Wax plugs", "Lantern"], ("cap", "fists", None, None, L("Bone"), T("Gold")),
+      dict(power="nova", glyph="鐘")),
+    A("Watcher", "Severed", "Was on the night shift when the planet first looked back. Now their eye goes where they can't.", (3, 7, 4, 8, 3, 6),
+      [("Send it off", "see through your head"), ("Night owl", "sharper at night"), ("Paranoid", "hates crowds")],
+      ["Binoculars", "Notebook", "Torch"], ("goggles", "knife", "pack", None, L("Teal"), T("Cyan")),
+      dict(power="scout", glyph="眼")),
+    A("Bone Twin", "Severed", "Was born with someone else's skull grown into theirs. Throws it. It throws itself back.", (5, 8, 5, 4, 4, 6),
+      [("Boomerang", "head flies out and back"), ("Lucky", "finds more loot"), ("Outcast", "towns don't trust you")],
+      ["Bone charm", "Twine", "Chalk"], (None, None, "duster", "chain", L("Black"), T("Lilac")),
+      dict(power="boomerang", glyph="骨")),
 ]
 CUSTOM = dict(name="Make your own", tag="You", blurb="Build them from nothing: body, colours, gear, stats and traits.")
 
@@ -219,14 +262,23 @@ def glyph(text, size, col):
     return _GL[k]
 
 
+def draw_head(screen, cx, cy, size, ch, skin, tilt=0):
+    """a head: its kanji in skin colour with a dark outline, so it reads over anything"""
+    ol = glyph(ch, size, (12, 10, 14))
+    for ox, oy in ((-2, 0), (2, 0), (0, -2), (0, 2)):
+        blit_rot(screen, ol, cx + ox, cy + oy, tilt)
+    blit_rot(screen, glyph(ch, size, tuple(skin)), cx, cy, tilt)
+
+
 def blit_rot(screen, surf, cx, cy, ang):
     if ang:
         surf = pygame.transform.rotate(surf, ang)
     screen.blit(surf, (cx - surf.get_width() // 2, cy - surf.get_height() // 2))
 
 
-def draw_char(screen, cx, cy, size, body, look, skin, mut=None, pose=None):
-    """the body symbol, two-toned (skin above, clothes below), gear symbols placed on it, posed for a move"""
+def draw_char(screen, cx, cy, size, body, look, skin, mut=None, pose=None, head=None):
+    """the body symbol, two-toned (skin above, clothes below), gear symbols placed on it, posed for a move.
+    head = the head's kanji (drawn on top of the body), "" if it's off somewhere, None for the old headless look"""
     hat, weapon, back, extra, coat, trim = look
     p = pose or {}
     dx, dy, tilt = p.get("dx", 0), p.get("dy", 0), p.get("tilt", 0)
@@ -253,10 +305,16 @@ def draw_char(screen, cx, cy, size, body, look, skin, mut=None, pose=None):
     blit_rot(screen, two, bx, by, tilt)
     if extra == "mutation" and mut and mut.startswith("Extra"):
         blit_rot(screen, glyph("手", int(size * 0.32), skin), bx - int(w * 0.62), by + int(h * 0.1), tilt)
+    rad = math.radians(tilt)
+    lift = 0
+    if head:                                                   # the head: a kanji in skin, outlined, sat on top
+        hs = int(size * 0.44)
+        hxh, hyh = bx - int(math.sin(rad) * h * 0.5), by - int(h * 0.5)
+        draw_head(screen, hxh, hyh, hs, head, skin, tilt)
+        lift = int(hs * 0.62)
     if hat:
         hg = glyph(HATS[hat][0], gs, trim if hat in ("goggles", "circlet", "visor", "crown") else coat)
-        rad = math.radians(tilt)
-        hx, hy = bx + int(math.sin(rad) * h * 0.55) * -1, by - int(h * 0.52)
+        hx, hy = bx + int(math.sin(rad) * h * 0.55) * -1, by - int(h * 0.52) - lift
         blit_rot(screen, hg, hx, hy, tilt)
     if weapon:
         wg = glyph(WEAPONS[weapon][0], gs, p.get("wcol", (205, 208, 215)))
@@ -399,6 +457,7 @@ def run(screen, root, shot=None, setup=None):
     hats, weps, backs, extras = list(HATS), list(WEAPONS), list(BACKS), list(EXTRAS)
     editing, row = False, 0
     fight = None                                              # (move name, start time)
+    headfx = None                                             # start time of a head demo
     msg, msg_t, hits = "", 0, []
     last_input = time.monotonic()
     clock = pygame.time.Clock()
@@ -498,6 +557,8 @@ def run(screen, root, shot=None, setup=None):
                     st["skin"] = (st["skin"] + 1) % len(SKINS)
             elif k == pygame.K_n:
                 st["name"] = rn()
+            elif k == pygame.K_h:
+                headfx = now
             elif k == pygame.K_f:
                 mv = MOVES[style]
                 prev = fight[0] if fight else None
@@ -507,6 +568,7 @@ def run(screen, root, shot=None, setup=None):
                           skin=random.randrange(len(SKINS)), name=rn(), mut=random.choice(MUTATIONS))
             elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 d = dict(name=st["name"], archetype=a["name"], body=body, skin_rgb=skin, look=list(look[:4]),
+                         head=a.get("head") or heads.default_head(look),
                          coat=look[4], trim=look[5], stats=dict(zip(STATS, a["stats"])),
                          traits=[t for t, _ in a["traits"]], kit=a["kit"],
                          mutation=st["mut"] if look[3] == "mutation" else None)
@@ -514,8 +576,12 @@ def run(screen, root, shot=None, setup=None):
                 with open(os.path.join(root, "character.json"), "w") as f:
                     json.dump(d, f, indent=1, ensure_ascii=False)
                 return d                                          # into the world
-        if fight is None and now - last_input > 2.5 and int(now * 10) % 40 == 0:   # shows off when idle
-            fight = (random.choice(MOVES[style]), now)
+        if fight is None and headfx is None and now - last_input > 2.5 and int(now * 10) % 40 == 0:   # shows off when idle
+            if random.random() < 0.5:
+                fight = (random.choice(MOVES[style]), now)
+            else:
+                headfx = now
+        hd = a.get("head") or heads.default_head(look)
         sw, sh = screen.get_size()
         t = now - t0
         screen.fill((10, 9, 14))
@@ -566,7 +632,67 @@ def run(screen, root, shot=None, setup=None):
         blit_rot(screen, dummy, dummy_x + int(shake), cy + 20, shake * 0.8)
         screen.blit(tiny.render("training dummy", True, (110, 110, 120)), (dummy_x - 40, cy + 110))
         mut = st["mut"] if look[3] == "mutation" else None
-        draw_char(screen, cx, cy, 200, body, look, skin, mut, pose)
+        # the head demo: where the head is, and what it does to the dummy
+        hu = (now - headfx) / 1.6 if headfx else None
+        if hu is not None and hu >= 1:
+            headfx, hu = None, None
+        pw = hd["power"]
+        away = hu is not None and pw in ("boomerang", "shield", "spin", "scout")
+        draw_char(screen, cx, cy, 200, body, look, skin, mut, pose, head="" if away else hd["glyph"])
+        if hu is not None:
+            hx0, hy0 = cx + int(pose.get("dx", 0)), cy - 125
+            P = heads.POWERS[pw]
+            if pw == "boomerang":                              # out to the dummy and back, spinning
+                k = math.sin(math.pi * hu)
+                hx, hy = hx0 + (dummy_x - hx0) * k, hy0 - 90 * math.sin(2 * math.pi * hu)
+                draw_head(screen, int(hx), int(hy), 88, hd["glyph"], skin, hu * 1440)
+                if abs(hu - 0.5) < 0.03 and (not hits or hits[-1][2] != (headfx, "bm")):
+                    hits.append((now, "head", (headfx, "bm")))
+            elif pw in ("fire", "frost", "storm", "rot"):      # it spits a character at the dummy
+                v = min(1.0, hu / 0.45)
+                if hu < 0.45:
+                    px_ = hx0 + (dummy_x - hx0) * v
+                    blit_rot(screen, glyph(P["glyph"], 70, P["col"]), int(px_), int(hy0 + 40 * v + 60 * v * v), hu * 400)
+                elif not hits or hits[-1][2] != (headfx, "spit"):
+                    hits.append((now, "head", (headfx, "spit")))
+                if hu >= 0.45:
+                    a_ = 1 - (hu - 0.45) / 0.55
+                    if pw == "storm":
+                        for j in range(3):
+                            pts = [(dummy_x + 30 * j, cy - 40 + 20 * j)] + [(dummy_x + 60 + 40 * q + random.randint(-15, 15),
+                                   cy - 60 + 30 * j + random.randint(-20, 20)) for q in range(3)]
+                            pygame.draw.lines(screen, P["col"], False, pts, 3)
+                    else:
+                        for q in range(10):
+                            ang = q * 0.63 + hu * 3
+                            r_ = 30 + 90 * (1 - a_)
+                            pygame.draw.circle(screen, P["col"], (dummy_x + int(math.cos(ang) * r_), cy + int(math.sin(ang) * r_ * 0.6)),
+                                               max(2, int(9 * a_)))
+            elif pw in ("shield", "spin"):                     # round and round you
+                rad_ = 150 if pw == "shield" else 235
+                ang = hu * (4 if pw == "shield" else 9) * math.pi
+                hx, hy = cx + math.cos(ang) * rad_, cy - 20 + math.sin(ang) * rad_ * 0.55
+                if pw == "spin":
+                    pygame.draw.line(screen, (150, 150, 160), (cx, cy - 60), (int(hx), int(hy)), 3)
+                draw_head(screen, int(hx), int(hy), 88, hd["glyph"], skin, ang * 57)
+                if math.hypot(hx - dummy_x, hy - cy) < 80 and (not hits or now - hits[-1][0] > 0.25):
+                    hits.append((now, "head", (headfx, round(hu, 2))))
+            elif pw == "nova":                                 # it screams
+                draw_head(screen, hx0 + random.randint(-4, 4), hy0 + random.randint(-4, 4), 88, hd["glyph"], skin, 0)
+                for q in range(3):
+                    r_ = int(((hu * 1.6 + q * 0.18) % 1.0) * 420)
+                    pygame.draw.circle(screen, look[5], (hx0, hy0 + 60), r_, 3)
+                if abs(hu - 0.3) < 0.03 and (not hits or hits[-1][2] != (headfx, "nova")):
+                    hits.append((now, "head", (headfx, "nova")))
+            elif pw == "scout":                                # off it goes, to look
+                k = min(1.0, hu / 0.3) if hu < 0.7 else max(0.0, 1 - (hu - 0.7) / 0.3)
+                hx, hy = hx0 + 260 * k, hy0 - 150 * k + 8 * math.sin(now * 6)
+                if 0.3 < hu < 0.7:
+                    pygame.draw.circle(screen, (60, 70, 50), (int(hx), int(hy)), 120, 2)
+                    screen.blit(tiny.render("you see what it sees", True, (150, 160, 140)), (int(hx) - 60, int(hy) + 60))
+                draw_head(screen, int(hx), int(hy), 88, hd["glyph"], skin, 0)
+            nm_ = mid.render(P["name"], True, look[5])
+            screen.blit(nm_, (cx + 30 - nm_.get_width() // 2, 150))
         # effects
         for (kind, k) in fxs:
             if kind == "flash":
@@ -674,14 +800,24 @@ def run(screen, root, shot=None, setup=None):
                 screen.blit(small.render("· " + it, True, (200, 198, 210)), (rx + (j % 2) * 185, y + (j // 2) * 20))
             y += ((len(a["kit"]) + 1) // 2) * 20 + 10
             screen.blit(mid.render("Moves", True, (230, 225, 210)), (rx, y)); y += 26
-            screen.blit(small.render("  ·  ".join(MOVES[style]), True, look[5]), (rx, y))
-        keys = "Up/Down who you were   Left/Right body   C skin   N name   R random   F fight   Tab build   Enter begin   Esc quit"
+            screen.blit(small.render("  ·  ".join(MOVES[style]), True, look[5]), (rx, y)); y += 28
+            P = heads.POWERS[hd["power"]]
+            screen.blit(mid.render("Head", True, (230, 225, 210)), (rx, y))
+            screen.blit(glyph(hd["glyph"], 22, look[5]), (rx + 60, y))
+            screen.blit(small.render(P["name"] + "   (H to try it)", True, look[5]), (rx + 110, y + 3)); y += 26
+            for ln in wrap(tiny, P["what"], 360):
+                screen.blit(tiny.render(ln, True, (190, 188, 200)), (rx, y)); y += 17
+        keys = "Up/Down who you were   Left/Right body   C skin   N name   R random   F fight   H head   Tab build   Enter begin   Esc quit"
         screen.blit(tiny.render(keys, True, (130, 130, 145)), (30, sh - 24))
         if msg and now - msg_t < 6:
             m = small.render(msg, True, (240, 220, 160))
             screen.blit(m, (sw // 2 - m.get_width() // 2, sh - 50))
         pygame.display.flip()
         if shot:
+            if setup and setup.get("head_u") is not None:
+                headfx = now - setup["head_u"] * 1.6
+                setup = None
+                continue
             if setup and setup.get("fight"):
                 fight = (setup["fight"], now - setup.get("u", 0.45) * 1.4)
                 setup = None
