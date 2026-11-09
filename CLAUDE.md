@@ -6,6 +6,10 @@ build a ship to get to space, then the game opens up. Still in the graphics/feel
 Original goal: standalone 2D roguelike, Caves of Qud-inspired *look* (own art, never copied), Stone Soup-style depth:
 huge generated world, thousands of spells/items, towns, shops, roads; places are random until visited, then permanent.
 
+## Direction
+See DIRECTION.md (Nov 2026): creepy derelict colony planet, changed colonists, the planet's eye, sanity that
+lies, shanties + decay, permadeath. Work order: look first (milestone 1), then systems. 70s Essex estates are being dropped.
+
 ## Run
 `rl` opens character creation (charcreate.py: 30 archetypes + make-your-own builder, spar with a dummy);
 Enter makes a NEW world and plays as that character (symbol + gear glyphs, stats drive HP/hit/dodge/damage,
