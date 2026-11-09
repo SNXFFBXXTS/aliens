@@ -71,3 +71,28 @@ TUTORIAL = {
 }
 CLASS_FOR = {"boomerang": "Head Thrower", "fire": "Ember Saint", "frost": "Frost Widow", "storm": "Storm Oracle",
              "rot": "Rot Priest", "shield": "Gate Warden", "spin": "Chain Monk", "nova": "Bell Ringer", "scout": "Watcher"}
+
+# every older character's head: a power and kanji that suit them, spread across all nine powers
+ARCH_HEADS = {
+    # boomerang: it always comes back
+    "Grifter": ("boomerang", "賭"), "Drifter Pilot": ("boomerang", "翼"), "Gunslinger": ("boomerang", "弾"),
+    "Scavenger": ("boomerang", "拾"), "Courier": ("boomerang", "届"),
+    # fire
+    "Bartender": ("fire", "酒"), "Cook": ("fire", "焼"), "Mercenary": ("fire", "火"), "Noodle Mechanic": ("fire", "麺"),
+    # frost: what it hits stays put
+    "Field Medic": ("frost", "麻"), "Oracle": ("frost", "時"), "Bounty Clerk": ("frost", "印"), "Smuggler": ("frost", "冷"),
+    # storm
+    "Netrunner": ("storm", "電"), "Ship Mechanic": ("storm", "磁"), "Cyborg": ("storm", "機"),
+    "Colony Engineer": ("storm", "工"),
+    # rot
+    "Mutant Pilgrim": ("rot", "変"), "Farmer": ("rot", "菌"), "Chemist": ("rot", "毒"), "Undertaker": ("rot", "墓"),
+    # shield: it circles and guards
+    "Ex-Cop": ("shield", "警"), "Survivalist": ("shield", "守"), "Riot Cop": ("shield", "壁"),
+    "Lapsed Monk": ("shield", "禅"), "Prospector": ("shield", "岩"),
+    # spin
+    "Ronin": ("spin", "刃"), "Martial Artist": ("spin", "流"), "Beast Tamer": ("spin", "獣"), "Rock Wrangler": ("spin", "縄"),
+    # nova: it screams
+    "Jazz Musician": ("nova", "音"), "Preacher": ("nova", "唱"), "Chimera": ("nova", "吼"), "Lounge Singer": ("nova", "歌"),
+    # scout: it goes and looks
+    "Bounty Hunter": ("scout", "追"), "Esper": ("scout", "霊"), "Hunter": ("scout", "鷹"),
+}

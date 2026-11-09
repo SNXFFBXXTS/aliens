@@ -99,7 +99,8 @@ chain orbit), nova (scream: hits + stuns within ~4 cells), scout (send it off; y
 scout head is out you see from the head (Game.update_head swaps self.vis). F = toward facing, right-click = at mouse
 (Game._cam maps screen->cells). Game.damage_mob is the one place creatures get hurt/killed; Game.mob_fx holds stun/poison.
 10 "Severed" classes (Head Thrower, Ember Saint, Frost Widow, Storm Oracle, Rot Priest, Gate Warden, Chain Monk,
-Bell Ringer, Watcher, Bone Twin); older archetypes get heads.default_head(look). character.json stores "head".
+Bell Ringer, Watcher, Bone Twin); older archetypes each get a fitting power + kanji from heads.ARCH_HEADS (spread over all nine powers,
+4-7 each; heads.default_head(look) is only a fallback for the custom builder). character.json stores "head".
 The head ALWAYS comes off (user): spit powers pop it forward to spit then it flies back (head_out kind
 "spit"), the scream lifts it off and shakes it (kind "scream"); hats go with the head. Selection screen: H demos the
 head on the dummy, and a TUTORIAL box plays real footage of the power (assets/tutorials/<power>.jpg filmstrips, made by

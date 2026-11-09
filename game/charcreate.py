@@ -233,6 +233,9 @@ ARCH = [
       ["Bone charm", "Twine", "Chalk"], (None, None, "duster", "chain", L("Black"), T("Lilac")),
       dict(power="boomerang", glyph="骨")),
 ]
+for _a in ARCH:                                    # the older characters get heads that suit them (heads.ARCH_HEADS)
+    if not _a.get("head") and _a["name"] in heads.ARCH_HEADS:
+        _a["head"] = dict(zip(("power", "glyph"), heads.ARCH_HEADS[_a["name"]]))
 CUSTOM = dict(name="Make your own", tag="You", blurb="Build them from nothing: body, colours, gear, stats and traits.")
 
 MUTATIONS = ["Carapace (+ armour, - speed)", "Quills (hurts what hits you)", "Photosynthetic skin (+ heals in sun)",
