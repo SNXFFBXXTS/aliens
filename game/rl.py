@@ -364,6 +364,8 @@ class Game:
         self.mob_img = {}
         self.flash = {}                     # mob id / "you" -> time of last hit
         self.mob_pos = {}                   # mob id -> where it's drawn (eases towards its square)
+        self.size = self.load_settings().get("size", 0.55)   # how big people and creatures are next to the scenery
+        self.sizer = False                  # the size slider is showing
         self.dead = False
         self.killer = ""
         self.lvl, self.xp, self.turn = 1, 0, 0
@@ -460,6 +462,65 @@ class Game:
                     if max(abs(dx), abs(dy)) == r and self.w.cell(gx + dx, gy + dy) not in BLOCKED and not self.w.mob_at(gx + dx, gy + dy):
                         return gx + dx, gy + dy
         return gx, gy
+
+    SIZE_MIN, SIZE_MAX = 0.3, 1.2
+
+    def load_settings(self):
+        try:
+            with open(os.path.join(ROOT, "settings.json")) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def save_settings(self):
+        st = self.load_settings()
+        st["size"] = round(self.size, 3)
+        with open(os.path.join(ROOT, "settings.json"), "w") as f:
+            json.dump(st, f)
+
+    def set_size(self, v):
+        v = max(self.SIZE_MIN, min(self.SIZE_MAX, v))
+        if abs(v - self.size) > 1e-4:
+            self.size = v
+            self._sized = {}
+
+    def sized(self, key, srf):
+        """a sprite at the chosen character size (cached)"""
+        c = getattr(self, "_sized", None)
+        if c is None:
+            c = self._sized = {}
+        if key not in c:
+            w, h = srf.get_size()
+            c[key] = pygame.transform.smoothscale(srf, (max(1, int(w * self.size)), max(1, int(h * self.size))))
+        return c[key]
+
+    def slider_rect(self):
+        sw, sh = self.screen.get_size()
+        return pygame.Rect(sw - 300, HUD_H + 14, 280, 70)
+
+    def draw_sizer(self):
+        r = self.slider_rect()
+        panel = pygame.Surface(r.size, pygame.SRCALPHA)
+        panel.fill((10, 8, 16, 215))
+        self.screen.blit(panel, r.topleft)
+        pygame.draw.rect(self.screen, (90, 80, 110), r, 1)
+        self.screen.blit(self.font.render(f"Character size  {int(self.size * 100)}%", True, (230, 225, 210)),
+                         (r.x + 12, r.y + 8))
+        tr = self.track_rect()
+        pygame.draw.rect(self.screen, (60, 55, 75), tr, border_radius=3)
+        u = (self.size - self.SIZE_MIN) / (self.SIZE_MAX - self.SIZE_MIN)
+        pygame.draw.rect(self.screen, (200, 170, 90), (tr.x, tr.y, int(tr.w * u), tr.h), border_radius=3)
+        pygame.draw.circle(self.screen, (245, 235, 200), (tr.x + int(tr.w * u), tr.centery), 9)
+        self.screen.blit(self.small.render("drag, or [ ]   Z to close", True, (130, 125, 140)), (r.x + 12, r.y + 50))
+
+    def track_rect(self):
+        r = self.slider_rect()
+        return pygame.Rect(r.x + 14, r.y + 34, r.w - 28, 8)
+
+    def slide_to(self, mx):
+        tr = self.track_rect()
+        u = max(0.0, min(1.0, (mx - tr.x) / tr.w))
+        self.set_size(self.SIZE_MIN + u * (self.SIZE_MAX - self.SIZE_MIN))
 
     def state_path(self):
         return os.path.join(self.w.dir, "player.json")
@@ -742,8 +803,9 @@ class Game:
     def box_cells(self, fx, fy):
         """cells your body overlaps when standing at (fx, fy)"""
         cx, cy = fx + 0.5, fy + 0.5
-        return {(x, y) for x in range(math.floor(cx - BODY), math.floor(cx + BODY) + 1)
-                for y in range(math.floor(cy - BODY), math.floor(cy + BODY) + 1)}
+        b = max(0.18, min(0.4, BODY * self.size / 0.55))       # smaller people fit through tighter gaps
+        return {(x, y) for x in range(math.floor(cx - b), math.floor(cx + b) + 1)
+                for y in range(math.floor(cy - b), math.floor(cy + b) + 1)}
 
     def sync(self):
         if (self.px, self.py) != self._cell:          # moved by something else (respawn, travel, loading)
@@ -930,6 +992,18 @@ class Game:
         self.say(f"Zoom {int(self.ZOOMS[self.zoom] * 100)}%")
 
     def handle(self, e):
+        if self.sizer and e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and \
+                self.slider_rect().inflate(0, 10).collidepoint(e.pos):
+            self.dragging = True
+            self.slide_to(e.pos[0])
+            return True
+        if e.type == pygame.MOUSEMOTION and getattr(self, "dragging", False):
+            self.slide_to(e.pos[0])
+            return True
+        if e.type == pygame.MOUSEBUTTONUP and getattr(self, "dragging", False):
+            self.dragging = False
+            self.save_settings()
+            return True
         if e.type == pygame.MOUSEWHEEL and not self.show_map:
             self.set_zoom(1 if e.y > 0 else -1)
         if e.type == pygame.KEYDOWN:
@@ -957,6 +1031,14 @@ class Game:
                 self.trip = (getattr(self, "trip", 0) + 1) % 4
                 self.say(["Trip off. Everything is ordinary. Suspiciously ordinary.", "Trip: mild.", "Trip: strong.",
                           "Trip: full send."][self.trip])
+            elif k == pygame.K_z:
+                self.sizer = not self.sizer
+                if not self.sizer:
+                    self.save_settings()
+            elif k in (pygame.K_LEFTBRACKET, pygame.K_RIGHTBRACKET):
+                self.set_size(self.size + (0.05 if k == pygame.K_RIGHTBRACKET else -0.05))
+                self.sizer = True
+                self.save_settings()
             elif k == pygame.K_n:
                 self.say("Sound on." if self.amb.toggle() else "Sound off.")
             elif k == pygame.K_m:
@@ -1023,14 +1105,18 @@ class Game:
             self.mob_pos[m.id] = (sx, sy)
             x, y = int(sx * PX) - cxp, int(sy * PX) - cyp + top
             if (m.x, m.y) in self.vis and -PX < x < sw and top - PX < y < top + vh:
-                S.blit(self.foot_shadow(), (x + 4, y + PX - 9))
-                spr = self.mob_sprite(m)
+                fx_, fy_ = x + PX // 2, y + PX - 4                  # where its feet are
+                sh = self.sized("foot", self.foot_shadow())
+                S.blit(sh, (fx_ - sh.get_width() // 2, fy_ - sh.get_height() // 2 - 1))
+                spr = self.sized(("mob",) + (m.biome, m.n, m.angry), self.mob_sprite(m))
                 if now - self.flash.get(m.id, 0) < 0.15:
                     spr = spr.copy(); spr.fill((255, 255, 255), special_flags=pygame.BLEND_RGB_MAX)
-                S.blit(spr, (x, y))
+                w_, h_ = spr.get_size()
+                S.blit(spr, (fx_ - w_ // 2, fy_ + 4 - h_))
                 if m.hp < m.maxhp:
-                    pygame.draw.rect(S, (60, 0, 0), (x + 3, y - 3, PX - 6, 3))
-                    pygame.draw.rect(S, (230, 50, 50), (x + 3, y - 3, int((PX - 6) * m.hp / m.maxhp), 3))
+                    bw, by = max(8, w_ - 4), fy_ + 4 - h_ - 4
+                    pygame.draw.rect(S, (60, 0, 0), (fx_ - bw // 2, by, bw, 3))
+                    pygame.draw.rect(S, (230, 50, 50), (fx_ - bw // 2, by, int(bw * m.hp / m.maxhp), 3))
         self._last_draw = now
         S.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), top - (cyp % PX)))
         glow = self.glow_frames()
@@ -1038,7 +1124,11 @@ class Game:
             g = glow[int(t * 7 + fx) % len(glow)]
             S.blit(g, (fx - g.get_width() // 2, fy - g.get_height() // 2), special_flags=pygame.BLEND_ADD)
         hx, hy = int(self.fx * PX) - cxp, int(self.fy * PX) - cyp + top
-        S.blit(self.foot_shadow(), (hx + 4, hy + PX - 9))
+        z_ = self.size
+        feet = hy + PX - 4                                   # your feet stay at the bottom of your square
+        mid = feet - int(PX * 0.6 * z_)                      # and the rest of you scales up from there
+        sh = self.sized("foot", self.foot_shadow())
+        S.blit(sh, (hx + PX // 2 - sh.get_width() // 2, feet - sh.get_height() // 2 - 1))
         if self.char:
             import charcreate
             left = getattr(self, "facing", (1, 0))[0] < 0
@@ -1051,30 +1141,31 @@ class Game:
                 pose = dict(pose)
                 for k_ in ("dx", "wdx"):
                     pose[k_] = pose.get(k_, 0) * 0.35
-                charcreate.draw_char(tmp, d // 2, d // 2, int(PX * 1.1), self.char["body"], self.char_look(),
+                charcreate.draw_char(tmp, d // 2, d // 2, max(4, int(PX * 1.1 * z_)), self.char["body"], self.char_look(),
                                      tuple(self.char["skin_rgb"]), None, pose)
                 if left:
                     tmp = pygame.transform.flip(tmp, True, False)
-                S.blit(tmp, (hx + PX // 2 - d // 2, hy + PX // 2 - d // 2 - 6))
+                S.blit(tmp, (hx + PX // 2 - d // 2, mid - d // 2))
                 if "flash" in [f[0] for f in fxs]:
-                    pygame.draw.circle(S, (255, 230, 140), (hx + PX // 2 + (-PX if left else PX), hy + PX // 2), 5)
+                    pygame.draw.circle(S, (255, 230, 140), (hx + PX // 2 + int((-PX if left else PX) * z_), mid), max(2, int(5 * z_)))
             else:                                          # fighting-game idle: bounce, squash and stretch, sway
                 hs = self.hero_surface(left)
                 w0, h0 = hs.get_size()
                 walking = now - getattr(self, "last_moved", 0) < 0.22
                 b = abs(math.sin(now * (9.0 if walking else 5.0)))       # 0..1, the bounce
-                sx = 1 + 0.06 * (0.5 - b)
-                sy = 1 - 0.08 * (0.5 - b)
+                sx = (1 + 0.06 * (0.5 - b)) * z_
+                sy = (1 - 0.08 * (0.5 - b)) * z_
                 tilt = 3 * math.sin(now * 2.4)
                 if walking:
                     tilt += -9 if not left else 9                         # lean into the step
                 img = pygame.transform.smoothscale(hs, (max(1, int(w0 * sx)), max(1, int(h0 * sy))))
                 img = pygame.transform.rotate(img, tilt)
-                lift = int(b * (7 if walking else 4))
+                lift = int(b * (7 if walking else 4) * z_)
                 S.blit(img, (hx + PX // 2 - img.get_width() // 2,
-                             hy + PX // 2 - 6 - lift - img.get_height() // 2 + int((h0 * sy - h0) / 2)))
+                             mid - lift - img.get_height() // 2 + int((h0 * sy - h0 * z_) / 2)))
         else:
-            S.blit(self.hero, (hx, hy))
+            hs = self.sized("hero-old", self.hero)
+            S.blit(hs, (hx + PX // 2 - hs.get_width() // 2, feet + 4 - hs.get_height()))
         S.set_clip(None)
         if S is not self.screen:
             scale = pygame.transform.scale if z > 1 else pygame.transform.smoothscale
@@ -1213,7 +1304,9 @@ class Game:
         for n, msg in enumerate(self.msgs):
             col = (225, 225, 225) if n == len(self.msgs) - 1 else (125, 125, 135)
             self.screen.blit(self.font.render(msg, True, col), (10, sh - LOG_H + 2 + n * 19))
-        keys = self.small.render("Move: arrows WASD numpad   . wait   +/- zoom   T trip   M map   N sound   Esc save & quit", True, (100, 100, 110))
+        if self.sizer and not self.show_map:
+            self.draw_sizer()
+        keys = self.small.render("Move: arrows WASD numpad   . wait   +/- zoom   Z size   T trip   M map   N sound   Esc save & quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
 
     def draw_death(self):
