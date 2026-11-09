@@ -1,0 +1,79 @@
+"""Things you find: what they are, what they do, and what each kind of container tends to hold.
+
+Containers are searched once; what's inside is decided by the world seed and the container's square, so it's
+the same every time (and nothing is made until you look).
+"""
+import random
+import zlib
+
+# id: (name, kind, weight kg, colour, effect)   effect: {"food": n, "water": n, "hp": n, "dmg": n}
+ITEMS = {
+    "beans":     ("tin of beans", "food", 0.4, (190, 120, 70), {"food": 35}),
+    "jerky":     ("strip of jerky", "food", 0.1, (150, 80, 60), {"food": 20}),
+    "bread":     ("loaf of stale bread", "food", 0.3, (200, 170, 110), {"food": 25}),
+    "fruit":     ("odd fruit", "food", 0.2, (200, 90, 150), {"food": 15, "water": 10}),
+    "water":     ("bottle of water", "drink", 0.5, (110, 170, 220), {"water": 45}),
+    "tea":       ("flask of cold tea", "drink", 0.5, (170, 130, 80), {"water": 30, "food": 5}),
+    "bandage":   ("bandage", "medical", 0.1, (230, 225, 210), {"hp": 8}),
+    "medkit":    ("medkit", "medical", 0.8, (220, 60, 60), {"hp": 25}),
+    "knife":     ("kitchen knife", "weapon", 0.3, (200, 200, 210), {"dmg": 2}),
+    "crowbar":   ("crowbar", "weapon", 1.5, (170, 60, 50), {"dmg": 3}),
+    "pipe":      ("length of pipe", "weapon", 2.0, (130, 130, 140), {"dmg": 2}),
+    "scrap":     ("piece of scrap metal", "part", 1.0, (140, 140, 150), {}),
+    "wire":      ("coil of wire", "part", 0.3, (200, 140, 60), {}),
+    "battery":   ("battery", "part", 0.6, (90, 170, 90), {}),
+    "circuit":   ("circuit board", "part", 0.2, (60, 140, 80), {}),
+    "cloth":     ("bolt of cloth", "part", 0.4, (150, 120, 170), {}),
+    "rope":      ("rope", "part", 0.8, (170, 150, 100), {}),
+    "fuel":      ("fuel cell", "part", 2.0, (230, 200, 60), {}),
+}
+
+# what turns up where: container code -> (chance of anything, [(item, weight), ...], most items)
+LOOT = {
+    "f_stove":  (0.7, [("beans", 4), ("bread", 3), ("jerky", 2), ("tea", 2), ("knife", 1)], 2),
+    "f_shelf":  (0.8, [("beans", 3), ("water", 3), ("bandage", 2), ("wire", 2), ("battery", 1), ("rope", 1)], 3),
+    "f_dress":  (0.6, [("cloth", 4), ("bandage", 2), ("knife", 1), ("water", 1)], 2),
+    "f_end":    (0.5, [("bandage", 3), ("water", 2), ("battery", 1), ("medkit", 1)], 1),
+    "f_crate":  (0.85, [("beans", 3), ("water", 3), ("scrap", 3), ("rope", 2), ("crowbar", 1), ("fuel", 1)], 3),
+    "f_sink":   (0.4, [("water", 4), ("bandage", 1)], 1),
+    "p_crate":  (0.8, [("scrap", 4), ("wire", 3), ("beans", 2), ("water", 2), ("circuit", 1), ("crowbar", 1)], 3),
+    "p_barrel": (0.6, [("water", 4), ("fuel", 1), ("scrap", 2)], 2),
+    "p_rack":   (0.6, [("pipe", 2), ("scrap", 3), ("wire", 2), ("rope", 1), ("battery", 1)], 2),
+    "p_cart":   (0.6, [("scrap", 3), ("rope", 2), ("beans", 1), ("fuel", 1)], 2),
+    "p_wagon":  (0.6, [("scrap", 3), ("cloth", 2), ("rope", 2), ("jerky", 1)], 2),
+    "p_scrap":  (0.9, [("scrap", 5), ("wire", 2), ("circuit", 1), ("battery", 1)], 3),
+    "p_car":    (0.7, [("scrap", 3), ("battery", 2), ("fuel", 1), ("wire", 2), ("circuit", 1)], 2),
+    "p_truck":  (0.7, [("scrap", 3), ("battery", 2), ("fuel", 2), ("wire", 2)], 3),
+    "p_hull":   (0.8, [("scrap", 4), ("circuit", 2), ("wire", 2), ("fuel", 1)], 3),
+    "p_pod":    (0.8, [("medkit", 1), ("water", 2), ("circuit", 2), ("battery", 1)], 2),
+    "p_panel":  (0.6, [("circuit", 2), ("wire", 3), ("battery", 2)], 2),
+}
+
+NAMES = {"f_stove": "stove", "f_shelf": "shelf", "f_dress": "dresser", "f_end": "bedside table", "f_crate": "crate",
+         "f_sink": "washbasin"}
+
+
+def loot(seed, code, x, y):
+    """what's in the container at (x, y): {item: count}"""
+    if code not in LOOT:
+        return {}
+    chance, table, most = LOOT[code]
+    r = random.Random(zlib.crc32(f"{seed}:{code}:{x}:{y}".encode()))
+    if r.random() > chance:
+        return {}
+    got = {}
+    for _ in range(r.randint(1, most)):
+        it = r.choices([t for t, _ in table], [w for _, w in table])[0]
+        got[it] = got.get(it, 0) + 1
+    return got
+
+
+def weight(inv):
+    return sum(ITEMS[i][2] * n for i, n in inv.items())
+
+
+def describe(got):
+    if not got:
+        return "nothing"
+    parts = [(f"{n} x " if n > 1 else "a ") + ITEMS[i][0] for i, n in got.items()]
+    return ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]

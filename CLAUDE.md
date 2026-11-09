@@ -55,6 +55,20 @@ whether you move or not. Creatures glide between squares when drawn (Game.mob_po
 - Character size slider: Z (or [ ]) -> Game.size (0.3..1.2, default 0.55), saved in ROOT/settings.json. Hero and
   creatures scale from their feet; collision body scales a bit too.
 
+## Scavenging and survival
+- items.py: ITEMS (food, drink, medical, weapons, parts for later building) and LOOT tables per container code
+  (house furniture f_stove/f_shelf/f_dress/f_end/f_crate/f_sink, ruin props p_crate/p_barrel/p_rack/p_car/...).
+  Contents come from seed + square (items.loot), so nothing is stored until searched; World.searched_set() is saved in
+  the world dir (searched.json).
+- E (or Space) searches the container within reach (Game.container_near; label + outline drawn over it, 1 s progress
+  bar, moving cancels). I/Tab opens the inventory (pauses): Enter uses/eats/holds a weapon, D drops.
+- Food and water drain each world tick (~14 / ~9 min from full); warnings at 25 and 0; at 0 you lose HP; no healing
+  unless both > 20. Held weapon adds damage. Inventory, food, water, weapon saved in player.json.
+
+## Performance notes
+Line of sight only recomputed when position/light changes (update_view vkey); darkness overlay keyed on what it shows
+and built with numpy; palette rebuilt ~12x/s; animated plants skipped in never-seen places. Walking ~7 ms/frame median.
+
 ## Content (Nov 2026)
 - structures.py: 33 abandoned-place layouts (ASCII plans + props, rotated/mirrored, ~1 in 4 zones, by biome);
   cultures.py adds a culture per region gone dystopian (forest/jungle Aztec, desert Egyptian, tundra Soviet,

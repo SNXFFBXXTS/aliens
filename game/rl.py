@@ -28,6 +28,7 @@ import mobs                                            # noqa: E402
 import immersion as im                                 # noqa: E402
 import structures                                      # noqa: E402
 import buildings                                       # noqa: E402
+import items                                           # noqa: E402
 from weird_proto import world8                         # noqa: E402
 from art import P, B, T, Painter                       # noqa: E402
 
@@ -173,6 +174,18 @@ class World:
         for (cx, cy) in self.codes:
             if self.inside(cx, cy):
                 self.write_chunk(cx, cy)
+        with open(os.path.join(self.dir, "searched.json"), "w") as f:
+            json.dump(sorted(self.searched_set()), f)
+
+    def searched_set(self):
+        """containers already gone through, as (x, y)"""
+        if not hasattr(self, "_searched"):
+            try:
+                with open(os.path.join(self.dir, "searched.json")) as f:
+                    self._searched = {tuple(q) for q in json.load(f)}
+            except (OSError, ValueError):
+                self._searched = set()
+        return self._searched
 
     def houses(self, cx, cy):
         """the houses in a loaded zone: (x0, y0, x1, y1) rects in world cells"""
@@ -410,11 +423,16 @@ class Game:
         self.stat = {k: stt.get(k, 5) for k in ("STR", "AGI", "TOU", "WIT", "CHA", "LCK")}
         self.base_hp = 15 + self.stat["TOU"] * 3                 # toughness decides how much you can take
         self.maxhp = self.base_hp
+        self.inv, self.food, self.water, self.weapon = {}, 100.0, 100.0, None
+        self.show_inv, self.inv_sel, self.searching = False, 0, None
         st = self.load_state()
         if st:
             self.lvl, self.xp, self.turn = st.get("lvl", 1), st.get("xp", 0), st.get("turn", 0)
             self.maxhp = self.base_hp + (self.lvl - 1) * 6
             self.hp = st.get("hp", self.maxhp)
+            self.inv = {k: v for k, v in st.get("inv", {}).items() if k in items.ITEMS}
+            self.food, self.water = st.get("food", 100.0), st.get("water", 100.0)
+            self.weapon = st.get("weapon") if st.get("weapon") in self.inv else None
             self.w.dead = set(st.get("dead", []))
             self.px, self.py = st["px"], st["py"]
             for i in self.w.dead:
@@ -573,7 +591,8 @@ class Game:
         self.w.save()
         with open(self.state_path() + ".tmp", "w") as f:
             json.dump({"px": self.px, "py": self.py, "hp": self.hp, "lvl": self.lvl, "xp": self.xp, "turn": self.turn,
-                       "dead": sorted(self.w.dead)}, f)
+                       "dead": sorted(self.w.dead), "inv": self.inv, "food": round(self.food, 1),
+                       "water": round(self.water, 1), "weapon": self.weapon}, f)
         os.replace(self.state_path() + ".tmp", self.state_path())
         if not self.w.showcase:
             with open(os.path.join(ROOT, "current.json"), "w") as f:
@@ -681,7 +700,8 @@ class Game:
         if random.random() > hit:
             self.say(f"You miss the {m.name}.")
             return
-        d = max(1, random.randint(2, 5) + self.lvl - 1 - m.sp.defn + (self.stat["STR"] - 5) // 2)
+        d = max(1, random.randint(2, 5) + self.lvl - 1 - m.sp.defn + (self.stat["STR"] - 5) // 2
+                + (items.ITEMS[self.weapon][4].get("dmg", 0) if self.weapon else 0))
         m.hp -= d
         self.flash[m.id] = time.monotonic()
         self.amb.fx("hit")
@@ -734,7 +754,24 @@ class Game:
                 occupied.discard((m.x, m.y))
                 m.x, m.y = target
                 occupied.add(target)
-        if not near_hostile and self.turn % 8 == 0 and self.hp < self.maxhp:
+        self.food = max(0.0, self.food - 0.12)          # ~14 minutes from full to starving
+        self.water = max(0.0, self.water - 0.18)        # ~9 minutes from full to parched
+        for name, v, low in (("hungry", self.food, "Your stomach growls. Find something to eat."),
+                             ("thirsty", self.water, "Your mouth is dry. Find water.")):
+            band = 0 if v > 25 else 1 if v > 0 else 2
+            if band > getattr(self, "_band_" + name, 0):
+                self.say(low if band == 1 else f"You're starving." if name == "hungry" else "You're parched.")
+            setattr(self, "_band_" + name, band)
+        if (self.food <= 0 or self.water <= 0) and self.turn % 12 == 0:
+            self.hp -= 1                                  # wasting away
+            self.flash["you"] = time.monotonic()
+            if self.hp <= 0:
+                self.hp, self.dead = 0, True
+                self.killer = "hunger" if self.food <= 0 else "thirst"
+                self.say("You collapse.")
+                return
+        fed = self.food > 20 and self.water > 20
+        if fed and not near_hostile and self.turn % 8 == 0 and self.hp < self.maxhp:
             self.hp += 1
         self.update_view()
 
@@ -816,6 +853,7 @@ class Game:
         self.dead = False
         self.xp = 0
         self.hp = self.maxhp
+        self.food, self.water = max(self.food, 50.0), max(self.water, 50.0)
         self.px, self.py = self.start_spot()
         self.here = self.w.cell(self.px, self.py)
         self.update_view()
@@ -858,9 +896,15 @@ class Game:
     def update(self, dt):
         """real time: glide about, bump into things, and let the world take its turns"""
         self.sync()
-        if self.dead or self.show_map:
+        if self.dead or self.show_map or self.show_inv:
             return
         now = time.monotonic()
+        if self.searching:
+            if abs(self.vx) + abs(self.vy) > 1.5:
+                self.searching = None
+                self.say("You stop searching.")
+            elif now - self.searching[3] >= self.SEARCH_S:
+                self.finish_search()
         keys = pygame.key.get_pressed()
         ix = iy = 0
         for k, (dx, dy) in self.MOVE_KEYS.items():
@@ -936,6 +980,82 @@ class Game:
         if now >= self.next_tick:                      # the world moves on whether you do or not
             self.next_tick = max(self.next_tick + TICK_S, now)
             self.end_turn()
+
+    SEARCH_S = 1.0          # seconds to go through a container
+
+    def container_near(self):
+        """the closest container within arm's reach: (x, y, code) or None"""
+        cx, cy = self.fx + 0.5, self.fy + 0.5
+        best = None
+        for y in range(self.py - 1, self.py + 2):
+            for x in range(self.px - 1, self.px + 2):
+                c = self.w.cell(x, y)
+                if c in items.LOOT:
+                    d = math.hypot(x + 0.5 - cx, y + 0.5 - cy)
+                    if d < 1.45 and (best is None or d < best[0]):
+                        best = (d, x, y, c)
+        return best[1:] if best else None
+
+    def thing_name(self, code):
+        return items.NAMES.get(code) or structures.PROP_NAMES.get(code[2:], code[2:])
+
+    def start_search(self):
+        if self.dead or self.show_map or self.searching:
+            return
+        q = self.container_near()
+        if not q:
+            self.say("There's nothing here to search.")
+            return
+        x, y, c = q
+        if (x, y) in self.w.searched_set():
+            self.say(f"You've already been through that {self.thing_name(c)}.")
+            return
+        self.searching = (x, y, c, time.monotonic())
+
+    def finish_search(self):
+        x, y, c, _ = self.searching
+        self.searching = None
+        self.w.searched_set().add((x, y))
+        got = items.loot(self.w.seed, c, x, y)
+        for k, n in got.items():
+            self.inv[k] = self.inv.get(k, 0) + n
+        self.say(f"You search the {self.thing_name(c)}: " + ("nothing worth taking." if not got else
+                                                              f"you find {items.describe(got)}."))
+        if got:
+            self.amb.fx("level", 0.25)
+
+    def inv_list(self):
+        order = {"food": 0, "drink": 1, "medical": 2, "weapon": 3, "part": 4}
+        return sorted(self.inv, key=lambda k: (order[items.ITEMS[k][1]], items.ITEMS[k][0]))
+
+    def use_item(self, k):
+        name, kind, _, _, eff = items.ITEMS[k]
+        if kind == "weapon":
+            self.weapon = None if self.weapon == k else k
+            self.say(f"You ready the {name}." if self.weapon else f"You put the {name} away.")
+            return
+        if kind == "part":
+            self.say(f"The {name} might be useful for building something. Keep hold of it.")
+            return
+        if kind == "medical" and self.hp >= self.maxhp:
+            self.say("You're not hurt.")
+            return
+        self.food = min(100.0, self.food + eff.get("food", 0))
+        self.water = min(100.0, self.water + eff.get("water", 0))
+        self.hp = min(self.maxhp, self.hp + eff.get("hp", 0))
+        self.inv[k] -= 1
+        if self.inv[k] <= 0:
+            del self.inv[k]
+        self.say({"food": f"You eat the {name}.", "drink": f"You drink the {name}.",
+                  "medical": f"You use the {name}. That's better."}[kind])
+
+    def drop_item(self, k):
+        self.inv[k] -= 1
+        if self.inv[k] <= 0:
+            del self.inv[k]
+            if self.weapon == k:
+                self.weapon = None
+        self.say(f"You leave the {items.ITEMS[k][0]} behind.")
 
     def enter(self, x, y):
         before = len(self.w.visited)
@@ -1048,6 +1168,21 @@ class Game:
             return True
         if e.type == pygame.MOUSEWHEEL and not self.show_map:
             self.set_zoom(1 if e.y > 0 else -1)
+        if e.type == pygame.KEYDOWN and self.show_inv:            # the inventory has the keys while it's open
+            k, lst = e.key, self.inv_list()
+            if k in (pygame.K_i, pygame.K_ESCAPE, pygame.K_TAB):
+                self.show_inv = False
+            elif k in (pygame.K_UP, pygame.K_w, pygame.K_k) and lst:
+                self.inv_sel = (self.inv_sel - 1) % len(lst)
+            elif k in (pygame.K_DOWN, pygame.K_s, pygame.K_j) and lst:
+                self.inv_sel = (self.inv_sel + 1) % len(lst)
+            elif k in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_e, pygame.K_SPACE) and lst:
+                self.use_item(lst[min(self.inv_sel, len(lst) - 1)])
+            elif k in (pygame.K_d, pygame.K_x) and lst:
+                self.drop_item(lst[min(self.inv_sel, len(lst) - 1)])
+            n = len(self.inv_list())
+            self.inv_sel = min(self.inv_sel, max(0, n - 1))
+            return True
         if e.type == pygame.KEYDOWN:
             k = e.key
             if self.dead:
@@ -1073,6 +1208,11 @@ class Game:
                 self.trip = (getattr(self, "trip", 0) + 1) % 4
                 self.say(["Trip off. Everything is ordinary. Suspiciously ordinary.", "Trip: mild.", "Trip: strong.",
                           "Trip: full send."][self.trip])
+            elif k in (pygame.K_e, pygame.K_SPACE) and not self.show_map:
+                self.start_search()
+            elif k in (pygame.K_i, pygame.K_TAB) and not self.show_map:
+                self.show_inv = True
+                self.inv_sel = 0
             elif k == pygame.K_z:
                 self.sizer = not self.sizer
                 if not self.sizer:
@@ -1216,6 +1356,24 @@ class Game:
         else:
             hs = self.sized("hero-old", self.hero)
             S.blit(hs, (hx + PX // 2 - hs.get_width() // 2, feet + 4 - hs.get_height()))
+        q = self.container_near() if not self.show_inv else None
+        if q:                                                # what you could search, right where it is
+            x, y, c = q
+            done = (x, y) in self.w.searched_set()
+            X, Y = x * PX - cxp + PX // 2, y * PX - cyp + top
+            pygame.draw.rect(S, (240, 220, 150) if not done else (110, 110, 120), (x * PX - cxp + 1, y * PX - cyp + top + 1,
+                             PX - 2, PX - 2), 1, border_radius=4)
+            label = ("E  search " if not done else "searched: ") + self.thing_name(c)
+            img = self.small.render(label, True, (245, 235, 205) if not done else (150, 150, 160))
+            bg = pygame.Surface((img.get_width() + 10, img.get_height() + 4), pygame.SRCALPHA)
+            bg.fill((10, 8, 14, 200))
+            S.blit(bg, (X - bg.get_width() // 2, Y - bg.get_height() - 4))
+            S.blit(img, (X - img.get_width() // 2, Y - bg.get_height() - 2))
+        if self.searching:
+            u = min(1.0, (now - self.searching[3]) / self.SEARCH_S)
+            bx, by = hx + PX // 2 - 16, hy - 8
+            pygame.draw.rect(S, (20, 18, 26), (bx - 1, by - 1, 34, 6))
+            pygame.draw.rect(S, (240, 210, 120), (bx, by, int(32 * u), 4))
         S.set_clip(None)
         if S is not self.screen:
             scale = pygame.transform.scale if z > 1 else pygame.transform.smoothscale
@@ -1579,10 +1737,17 @@ class Game:
         pygame.draw.rect(self.screen, (14, 12, 18), (0, sh - LOG_H, sw, LOG_H))
         name = NAMES.get(self.here, self.here)
         self.screen.blit(self.big.render(name, True, (240, 220, 160)), (10, 1))
-        bx = 230                                            # health bar
-        pygame.draw.rect(self.screen, (60, 10, 14), (bx, 8, 160, 14))
-        pygame.draw.rect(self.screen, (220, 50, 60), (bx, 8, int(160 * self.hp / self.maxhp), 14))
-        self.screen.blit(self.small.render(f"HP {self.hp}/{self.maxhp}", True, (255, 255, 255)), (bx + 6, 7))
+        bx = 200                                            # health, food and water bars
+        for i, (lab, v, top_, col, bgc) in enumerate((
+                (f"HP {self.hp}/{self.maxhp}", self.hp, self.maxhp, (220, 50, 60), (60, 10, 14)),
+                (f"Food {int(self.food)}", self.food, 100, (220, 150, 60), (60, 36, 12)),
+                (f"Water {int(self.water)}", self.water, 100, (80, 150, 230), (14, 34, 60)))):
+            x, w = bx + i * 118, 110
+            low = top_ and v / top_ <= 0.2 and int(time.monotonic() * 3) % 2     # blink when low
+            pygame.draw.rect(self.screen, bgc, (x, 8, w, 14))
+            pygame.draw.rect(self.screen, (255, 255, 255) if low else col, (x, 8, int(w * max(0, v) / top_), 14))
+            self.screen.blit(self.small.render(lab, True, (255, 255, 255)), (x + 5, 7))
+        bx += 3 * 118 - 175
         danger = 1 + self.w.tier(self.px // CS, self.py // CS)
         day, phase, _, _ = self.clock()
         who = f"{self.char['name']} ({self.char['archetype']})   " if self.char else ""
@@ -1595,8 +1760,43 @@ class Game:
             self.screen.blit(self.font.render(msg, True, col), (10, sh - LOG_H + 2 + n * 19))
         if self.sizer and not self.show_map:
             self.draw_sizer()
-        keys = self.small.render("Move: arrows WASD numpad   . wait   +/- zoom   Z size   T trip   M map   N sound   Esc save & quit", True, (100, 100, 110))
+        if self.show_inv:
+            self.draw_inventory()
+        keys = self.small.render("Move: arrows/WASD   E search   I inventory   . wait   +/- zoom   Z size   M map   N sound   Esc save & quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
+
+    def draw_inventory(self):
+        sw, sh = self.screen.get_size()
+        lst = self.inv_list()
+        w, h = 520, min(sh - HUD_H - LOG_H - 40, 120 + max(1, len(lst)) * 26)
+        r = pygame.Rect((sw - w) // 2, HUD_H + 20, w, h)
+        panel = pygame.Surface(r.size, pygame.SRCALPHA)
+        panel.fill((12, 10, 18, 235))
+        self.screen.blit(panel, r.topleft)
+        pygame.draw.rect(self.screen, (90, 80, 110), r, 1, border_radius=4)
+        self.screen.blit(self.big.render("Inventory", True, (240, 220, 160)), (r.x + 16, r.y + 10))
+        kg = self.small.render(f"carrying {items.weight(self.inv):.1f} kg", True, (150, 145, 160))
+        self.screen.blit(kg, (r.right - kg.get_width() - 16, r.y + 18))
+        y = r.y + 50
+        if not lst:
+            self.screen.blit(self.font.render("Nothing yet. Search crates, shelves and stoves (E).", True,
+                                              (160, 155, 170)), (r.x + 16, y))
+        heads = {"food": "Food", "drink": "Drink", "medical": "Medical", "weapon": "Weapons", "part": "Parts"}
+        rows_fit = (r.bottom - 40 - y) // 26
+        first = max(0, min(self.inv_sel - rows_fit // 2, len(lst) - rows_fit))
+        for i, k in enumerate(lst[first:first + rows_fit], start=first):
+            name, kind, kgs, col, eff = items.ITEMS[k]
+            if i == self.inv_sel:
+                pygame.draw.rect(self.screen, (52, 44, 66), (r.x + 8, y - 2, w - 16, 24), border_radius=3)
+            pygame.draw.rect(self.screen, col, (r.x + 18, y + 4, 12, 12), border_radius=2)
+            label = f"{name}" + (f"  x{self.inv[k]}" if self.inv[k] > 1 else "") + ("   (in hand)" if k == self.weapon else "")
+            self.screen.blit(self.font.render(label, True, (235, 230, 220)), (r.x + 40, y + 1))
+            what = ", ".join(f"+{v} {n}" for n, v in eff.items()) if eff else ""
+            tag = self.small.render(f"{heads[kind]}  {what}", True, (140, 135, 150))
+            self.screen.blit(tag, (r.right - tag.get_width() - 16, y + 4))
+            y += 26
+        keys = self.small.render("Up/Down choose    Enter use / eat / hold    D drop    I close", True, (130, 125, 140))
+        self.screen.blit(keys, (r.x + 16, r.bottom - 24))
 
     def draw_death(self):
         sw, sh = self.screen.get_size()
@@ -1604,7 +1804,8 @@ class Game:
         ov.fill((20, 0, 0, 190))
         self.screen.blit(ov, (0, 0))
         for i, (s, f, col) in enumerate([("You died.", self.big, (255, 90, 90)),
-                                         (f"Killed by a {self.killer} on turn {self.turn}.", self.font, (230, 220, 220)),
+                                         (f"Died of {self.killer} on turn {self.turn}." if self.killer in ("hunger", "thirst")
+                                          else f"Killed by a {self.killer} on turn {self.turn}.", self.font, (230, 220, 220)),
                                          ("Press Enter to wake up back in town.   Esc quits.", self.font, (170, 160, 160))]):
             img = f.render(s, True, col)
             self.screen.blit(img, img.get_rect(center=(sw // 2, sh // 2 - 30 + i * 32)))
