@@ -26,6 +26,7 @@ ITEMS = {
     "cloth":     ("bolt of cloth", "part", 0.4, (150, 120, 170), {}),
     "rope":      ("rope", "part", 0.8, (170, 150, 100), {}),
     "fuel":      ("fuel cell", "part", 2.0, (230, 200, 60), {}),
+    "wood":      ("bundle of wood", "part", 1.2, (150, 110, 70), {}),
 }
 
 # what turns up where: container code -> (chance of anything, [(item, weight), ...], most items)
@@ -100,6 +101,7 @@ GLYPH = {
     "knife": (")", "white"), "crowbar": (")", "red"), "pipe": (")", "grey"),
     "scrap": ("*", "dgrey"), "wire": ("~", "yellow"), "battery": ("■", "lgreen"), "circuit": ("≡", "green"),
     "cloth": ("░", "magenta"), "rope": ("§", "brown"), "fuel": ("♦", "yellow"),
+    "wood": ("=", "brown"),
 }
 CATEGORY = {"food": ("Comestibles", "%"), "drink": ("Drinks", "!"), "medical": ("Medicine", "♥"),
             "weapon": ("Hand weapons", ")"), "part": ("Salvage", "*")}
@@ -122,6 +124,7 @@ DESC = {
     "cloth": "A bolt of sheeting, for bandages or patching.",
     "rope": "Strong rope, frayed at one end as if it was cut in a hurry.",
     "fuel": "A fuel cell. Precious. The colony would have killed for this. Maybe someone did.",
+    "wood": "Dead branches, snapped and bundled. Everything out here burns, eventually.",
 }
 
 
@@ -138,3 +141,19 @@ def plural(k, n):
     else:
         head = head + ("es" if head.endswith(("ch", "sh", "x", "s")) else "s")
     return f"{n} {head}{sep}{tail}"
+
+
+# what you can build (B): name -> (cell codes it takes up, cost {item: n}, what it is)
+BUILD = [
+    ("Plank wall", ["swall_wood"], {"wood": 2}, "Badly nailed planks. Keeps most things out."),
+    ("Scrap wall", ["swall_iron"], {"scrap": 2}, "Sheet iron. Loud when things hit it, which is the point."),
+    ("Tarp wall", ["swall_tarp"], {"cloth": 1, "rope": 1}, "Cheap. You can hear through it. So can they."),
+    ("Doorway", ["sdoor"], {"wood": 1, "cloth": 1}, "A gap in the wall with a rag over it."),
+    ("Pallet floor", ["spallet"], {"wood": 1}, "Keeps you out of the mud."),
+    ("Campfire", ["bonfire"], {"wood": 3}, "Light and warmth. Your camp starts where your fire is."),
+    ("Bedroll", ["f_matt0", "f_matt1"], {"cloth": 2}, "Somewhere to lie down. It's not sleep, quite."),
+    ("Storage crate", ["f_crate"], {"wood": 3}, "Keeps what you put in it. Nobody else can be trusted to."),
+    ("Workbench", ["f_bench"], {"wood": 3, "scrap": 2}, "Somewhere to make things, when you know how."),
+    ("Water barrel", ["f_wbarrel"], {"scrap": 2, "rope": 1}, "Catches what the sky gives. Mostly water."),
+    ("Spiked barricade", ["p_fence"], {"wood": 2}, "Sharpened stakes. Slows them down. Hurts them going over."),
+]

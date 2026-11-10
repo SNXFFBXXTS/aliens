@@ -198,6 +198,8 @@ class World:
         for (cx, cy) in self.codes:
             if self.inside(cx, cy):
                 self.write_chunk(cx, cy)
+        with open(os.path.join(self.dir, "built.json"), "w") as f:
+            json.dump([[x, y, c, o] for (x, y), (c, o) in self.built_set().items()], f)
         with open(os.path.join(self.dir, "containers.json"), "w") as f:
             json.dump([[x, y, inv] for (x, y), inv in self.containers().items()], f)
 
@@ -218,6 +220,44 @@ class World:
 
     def searched_set(self):
         return self.containers().keys()
+
+    def set_cell(self, x, y, code):
+        """change one square (building, taking down) and have its zone redrawn in the background"""
+        k = (x // CS, y // CS)
+        self.chunk(*k)
+        self.codes[k][y % CS, x % CS] = code
+        if not hasattr(self, "stale"):
+            self.stale = set()
+        self.stale.add(k)
+        for cache in ("_houses", "_hbits", "_furn"):            # what was worked out about this zone is out of date
+            if hasattr(self, cache):
+                getattr(self, cache).clear()
+        self.queued.discard(k)
+        self.queued.add(k)
+        self.jobs.put(k)
+
+    def furniture(self, cx, cy):
+        """every furniture square in a loaded zone, built or found: [(x, y, code)]"""
+        if not hasattr(self, "_furn"):
+            self._furn = {}
+        k = (cx, cy)
+        if k not in self._furn:
+            codes = self.codes.get(k)
+            if codes is None:
+                return []
+            ys, xs = np.nonzero(np.char.startswith(codes, "f_"))
+            self._furn[k] = [(cx * CS + int(x), cy * CS + int(y), str(codes[y, x])) for y, x in zip(ys, xs)]
+        return self._furn[k]
+
+    def built_set(self):
+        """squares you built yourself: (x, y) -> code"""
+        if not hasattr(self, "_built"):
+            try:
+                with open(os.path.join(self.dir, "built.json")) as f:
+                    self._built = {(d[0], d[1]): (d[2], d[3] if len(d) > 3 else "grass") for d in json.load(f)}
+            except (OSError, ValueError):
+                self._built = {}
+        return self._built
 
     def houses(self, cx, cy):
         """the houses in a loaded zone: (x0, y0, x1, y1) rects in world cells"""
@@ -272,10 +312,16 @@ class World:
         """the zone as a pygame surface (palette indices; colours come from the cycling palette at draw time).
         Usually already built in the background by the prefetcher; otherwise built now."""
         k = (cx, cy)
-        if k in self.surf:
+        if k in self.surf and k not in getattr(self, "stale", set()):
             return self.surf[k]
         with self.lock:
             done = self.ready.pop(k, None)
+        if done is None and k in self.surf:                 # being rebuilt: keep showing the old one meanwhile
+            return self.surf[k]
+        if k in getattr(self, "stale", set()):
+            self.stale.discard(k)
+            x0, y0 = cx * CS, cy * CS                        # its fires are re-found from the new build
+            self.fires = {f for f in self.fires if not (x0 <= f[0] < x0 + CS and y0 <= f[1] < y0 + CS)}
         if done is None:
             done = self.build(cx, cy)
         img, feats, fires, fsprites = done
@@ -310,7 +356,7 @@ class World:
         while True:
             k = self.jobs.get()
             try:
-                if k not in self.surf:
+                if k not in self.surf or k in getattr(self, "stale", set()):
                     out = self.build(*k)
                     with self.lock:
                         self.ready[k] = out
@@ -1059,12 +1105,13 @@ class Game:
         self.sync()
         if getattr(self, "cold_open", None):
             return
-        if self.dead or self.show_map or self.show_inv or self.loot:
+        if self.dead or self.show_map or self.show_inv or self.loot or getattr(self, "build_menu", False):
             return
         now = time.monotonic()
         if now < self.freeze_until:                           # hit-stop: everything holds for a beat
             return
         self.update_head(dt)
+        self.update_gather()
         if self.searching:
             if abs(self.vx) + abs(self.vy) > 1.5:
                 self.searching = None
@@ -1767,6 +1814,154 @@ class Game:
             img.set_alpha(int(255 * min(1.0, (1 - u) * 3)))
             S.blit(img, (X - img.get_width() // 2, Y - img.get_height() // 2))
 
+    # ── gathering and building ──
+    WOODY = {"forest", "jungle", "taiga", "swamp", "savanna", "hills", "meadow", "fungal", "grass"}
+
+    def start_gather(self):
+        if self.dead or self.show_map or getattr(self, "gathering", None):
+            return
+        near = {self.w.cell(self.px + a, self.py + b) for a in (-1, 0, 1) for b in (-1, 0, 1)}
+        if not near & self.WOODY:
+            self.say("Nothing here to break off. Find trees.")
+            return
+        self.gathering = time.monotonic()
+        self.amb.fx("rummage", 1.2)
+
+    def update_gather(self):
+        g = getattr(self, "gathering", None)
+        if not g:
+            return
+        if abs(self.vx) + abs(self.vy) > 1.5:
+            self.gathering = None
+            self.say("You stop gathering.")
+        elif time.monotonic() - g >= 1.2:
+            self.gathering = None
+            n = random.choice((1, 1, 2))
+            self.inv["wood"] = self.inv.get("wood", 0) + n
+            self.say(f"You snap off dead branches: {items.plural('wood', n)}." +
+                     (" Something in the trees goes quiet while you do it." if random.random() < 0.1 else ""))
+            self.amb.fx("open_wood", 1.0)
+            self.burst(self.fx + 0.5, self.fy + 0.4, (120, 90, 60), 8, 3, 2, grav=5)
+
+    def build_target(self):
+        """the square you'd build on: under the mouse if you've been using it, else the one in front of you"""
+        if getattr(self, "_cam", None) and time.monotonic() - getattr(self, "mouse_moved", 0) < 3:
+            cxp, cyp, kx, ky, top = self._cam
+            mx, my = pygame.mouse.get_pos()
+            return int(math.floor((mx * kx + cxp) / PX)), int(math.floor(((my - HUD_H) * ky + cyp) / PX))
+        fx_, fy_ = getattr(self, "facing", (0, 1))
+        return self.px + fx_, self.py + fy_
+
+    def can_build(self, x, y, code):
+        c = self.w.cell(x, y)
+        if (x, y) == (self.px, self.py) or self.w.mob_at(x, y):
+            return False
+        if c in ("sdirt", "spallet") and code.startswith(("f_", "p_")):
+            return True                                        # furniture on a floor
+        return self.blocked(x, y) is None and c not in weird.WATER and c not in buildings.HOUSE and \
+            not c.startswith(("f_", "p_")) and c not in ("bonfire", "bridge", "mud" if code == "spallet" else "")
+
+    def recipe_cells(self, r, x, y):
+        return [(x, y + i, code) for i, code in enumerate(items.BUILD[r][1])]
+
+    def afford(self, r):
+        return all(self.inv.get(k, 0) >= n for k, n in items.BUILD[r][2].items())
+
+    def place_build(self):
+        r = self.placing
+        x, y = self.build_target()
+        cells = self.recipe_cells(r, x, y)
+        name, _, cost, _ = items.BUILD[r]
+        if not self.afford(r):
+            self.say("You don't have what it takes: " + ", ".join(f"{n} {items.ITEMS[k][0]}" for k, n in cost.items()) + ".")
+            return
+        if not all(self.can_build(cx, cy, code) for cx, cy, code in cells):
+            self.say("You can't build that there.")
+            return
+        for k, n in cost.items():
+            self.inv[k] -= n
+            if self.inv[k] <= 0:
+                del self.inv[k]
+        for cx, cy, code in cells:
+            self.w.built_set()[(cx, cy)] = (code, self.w.cell(cx, cy))
+            self.w.set_cell(cx, cy, code)
+            if code == "f_crate":
+                self.w.containers()[(cx, cy)] = {}
+            self.burst(cx + 0.5, cy + 0.5, (150, 120, 90), 10, 4, 2, grav=4)
+        self.amb.fx("open_wood", 1.2)
+        self.juice(shake=1.5)
+        self.say(f"You build a {name.lower()}." + (" It's yours. That means something here." if code == "bonfire" else ""))
+
+    def take_down(self):
+        x, y = self.build_target()
+        b = self.w.built_set()
+        if (x, y) not in b:
+            self.say("You didn't build that." if self.w.cell(x, y) in buildings.HOUSE else "There's nothing of yours there.")
+            return
+        code = b[(x, y)][0]
+        r = next((i for i, rec in enumerate(items.BUILD) if code in rec[1]), None)
+        cells = [(x, y)]
+        if code in ("f_matt0", "f_matt1"):                     # both halves of a bedroll
+            cells = [(x, y), (x, y + 1)] if code == "f_matt0" else [(x, y - 1), (x, y)]
+        for cx, cy in cells:
+            if (cx, cy) in b:
+                self.w.set_cell(cx, cy, b.pop((cx, cy))[1])
+                self.w.containers().pop((cx, cy), None)
+        if r is not None:                                     # you get half back
+            for k, n in items.BUILD[r][2].items():
+                if n // 2:
+                    self.inv[k] = self.inv.get(k, 0) + n // 2
+        self.amb.fx("open_wood", 0.8)
+        self.say("You pull it apart and keep what's worth keeping.")
+
+    def draw_build_menu(self):
+        import dosui
+        if not hasattr(self, "dos"):
+            self.dos = dosui.Dos()
+        D = self.dos
+        D.clear()
+        D.put(1, 0, "Build", "white")
+        D.put(1, 1, "What do you want to build?", "yellow")
+        y = 3
+        for i, (name, cells, cost, what) in enumerate(items.BUILD):
+            ok = self.afford(i)
+            L = self.LETTERS[i]
+            D.put(2, y, f"{L} - ", "white" if ok else "dgrey")
+            D.put(6, y, name, "white" if ok else "dgrey")
+            cx = 26
+            for k, n in cost.items():
+                have = self.inv.get(k, 0)
+                g, col = items.GLYPH[k]
+                D.put(cx, y, g, col if have >= n else "dgrey")
+                txt = f" {n} {items.ITEMS[k][0].split(' of ')[-1]} ({have})"
+                D.put(cx + 1, y, txt, "grey" if have >= n else "red")
+                cx += len(txt) + 3
+            D.put(6, y + 1, what, "dgrey")
+            y += 2
+        D.put(0, 23, "─" * 80, "dgrey")
+        D.put(1, 24, "[a-k] choose, then place it: [Enter]/[E]/click builds  [X] takes yours down  [Esc] done", "grey")
+        self._dos_place = D.blit_to(self.screen)
+
+    def draw_build_ghost(self, S, top, cxp, cyp):
+        """where the thing you're placing would go: green if you can, red if you can't"""
+        r = self.placing
+        x, y = self.build_target()
+        cells = self.recipe_cells(r, x, y)
+        ok = self.afford(r) and all(self.can_build(cx, cy, code) for cx, cy, code in cells)
+        for cx, cy, code in cells:
+            X, Y = cx * PX - cxp, cy * PX - cyp + top
+            g = pygame.Surface((PX, PX), pygame.SRCALPHA)
+            g.fill((80, 200, 110, 70) if ok else (220, 60, 60, 70))
+            S.blit(g, (X, Y))
+            pygame.draw.rect(S, (120, 240, 150) if ok else (240, 90, 90), (X, Y, PX, PX), 1)
+        name = items.BUILD[r][0]
+        img = self.small.render(f"{name}  (Enter/click build, X take down, Esc done)", True, (230, 230, 220))
+        X, Y = x * PX - cxp, y * PX - cyp + top
+        bg = pygame.Surface((img.get_width() + 10, img.get_height() + 4), pygame.SRCALPHA)
+        bg.fill((10, 8, 14, 200))
+        S.blit(bg, (X + PX // 2 - bg.get_width() // 2, Y - 22))
+        S.blit(img, (X + PX // 2 - img.get_width() // 2, Y - 20))
+
     def enter(self, x, y):
         before = len(self.w.visited)
         self.px, self.py = x, y
@@ -1963,6 +2158,28 @@ class Game:
             self.use_head((wx, wy))
         if e.type == pygame.MOUSEWHEEL and not self.show_map:
             self.set_zoom(1 if e.y > 0 else -1)
+        if e.type == pygame.MOUSEMOTION:
+            self.mouse_moved = time.monotonic()
+        if getattr(self, "build_menu", False) and e.type == pygame.KEYDOWN:   # the build menu
+            if e.unicode and e.unicode in self.LETTERS[:len(items.BUILD)]:   # (letters first: b is a recipe too)
+                self.placing, self.build_menu = self.LETTERS.index(e.unicode), False
+            elif e.key == pygame.K_ESCAPE:
+                self.build_menu = False
+            return True
+        if getattr(self, "placing", None) is not None and e.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+            if e.type == pygame.KEYDOWN and e.key in (pygame.K_ESCAPE,):
+                self.placing = None
+                return True
+            if e.type == pygame.KEYDOWN and e.key == pygame.K_b:
+                self.placing, self.build_menu = None, True
+                return True
+            if (e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_e)) or \
+                    (e.type == pygame.MOUSEBUTTONDOWN and e.button == 1):
+                self.place_build()
+                return True
+            if e.type == pygame.KEYDOWN and e.key == pygame.K_x:
+                self.take_down()
+                return True
         if (self.show_inv or self.loot) and e.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
                                                        pygame.MOUSEMOTION):
             self.bag_input(e)                                     # the bag (and any open container) has the input
@@ -1998,6 +2215,10 @@ class Game:
                 self.show_inv, self.detail = True, None
             elif k == pygame.K_f and not self.show_map:
                 self.use_head()
+            elif k == pygame.K_b and not self.show_map:
+                self.build_menu = True
+            elif k == pygame.K_g and not self.show_map:
+                self.start_gather()
             elif k == pygame.K_v:
                 self.show_mini = not getattr(self, "show_mini", True)
             elif k == pygame.K_z:
@@ -2159,6 +2380,13 @@ class Game:
             hs = self.sized("hero-old", self.hero)
             S.blit(hs, (hx + PX // 2 - hs.get_width() // 2, feet + 4 - hs.get_height()))
         self.draw_head_things(S, top, cxp, cyp)
+        if getattr(self, "placing", None) is not None:
+            self.draw_build_ghost(S, top, cxp, cyp)
+        if getattr(self, "gathering", None):                  # gathering takes a moment
+            u = min(1.0, (now - self.gathering) / 1.2)
+            gx_, gy_ = int(self.fx * PX) - cxp + PX // 2 - 16, int(self.fy * PX) - cyp + top - 8
+            pygame.draw.rect(S, (20, 18, 26), (gx_ - 1, gy_ - 1, 34, 6))
+            pygame.draw.rect(S, (170, 130, 80), (gx_, gy_, int(32 * u), 4))
         q = self.container_near() if not (self.show_inv or self.loot) else None
         if q:                                                # what you could search, right where it is
             x, y, c = q
@@ -2468,28 +2696,22 @@ class Game:
         return out
 
     def draw_furniture(self, S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y, t):
-        """the furniture in every house in view"""
+        """all the furniture in view: found in houses and shacks, or built by you"""
         self.lamps = []
         for zy in range(c0y, c1y + 1):
             for zx in range(c0x, c1x + 1):
-                for rect in self.w.houses(zx, zy):
-                    x0, y0, x1, y1 = rect
-                    if x0 * PX - cxp > sw or (x1 + 1) * PX - cxp < 0 or y0 * PX - cyp > vh or (y1 + 1) * PX - cyp < 0:
-                        continue
-                    var = (x0 * 7 + y0 * 13) % 97
-                    cx_, cy_ = self.fx + 0.5, self.fy + 0.5
-                    lit = True
-                    furn = self.w.house_bits(rect)[0]
-                    tables = {(x, y) for x, y, c in furn if c in ("f_tab0", "f_tab1")}
-                    for (x, y, c) in furn:
-                        face = (0, 0)
-                        if c == "f_chair":
-                            face = next(((dx, dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
-                                         if (x + dx, y + dy) in tables), (0, 1))
-                        X, Y = x * PX - cxp, y * PX - cyp + top
-                        S.blit(self.furn_sprite(c, var + x * 3 + y, face), (X, Y))
-                        if lit and c in ("f_lamp", "f_end", "f_drum", "f_shrine") and (x, y) in self.vis:
-                            self.lamps.append((X + PX // 2, Y + PX // 2 - 2, c == "f_lamp"))
+                furn = [f for f in self.w.furniture(zx, zy)
+                        if -PX < f[0] * PX - cxp < sw + PX and -PX < f[1] * PX - cyp < vh + PX]
+                tables = {(x, y) for x, y, c in furn if c in ("f_tab0", "f_tab1")}
+                for (x, y, c) in furn:
+                    face = (0, 0)
+                    if c == "f_chair":
+                        face = next(((dx, dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                                     if (x + dx, y + dy) in tables), (0, 1))
+                    X, Y = x * PX - cxp, y * PX - cyp + top
+                    S.blit(self.furn_sprite(c, (x * 7 + y * 13) % 97, face), (X, Y))
+                    if c in ("f_lamp", "f_end", "f_drum", "f_shrine") and (x, y) in self.vis:
+                        self.lamps.append((X + PX // 2, Y + PX // 2 - 2, c == "f_lamp"))
 
     def _zoomed(self, w, h):
         if getattr(self, "_zoomed_s", None) is None or self._zoomed_s.get_size() != (w, h):
@@ -2797,10 +3019,12 @@ class Game:
         if self.sizer and not self.show_map:
             self.draw_sizer()
 
-        keys = self.small.render("Move: arrows/WASD   F head   E search   I inventory   M map   V minimap   +/- zoom   Z size   N sound   Esc save & quit", True, (100, 100, 110))
+        keys = self.small.render("Move: WASD   F head   E search   G gather wood   B build   I bag   M map   V minimap   +/- zoom   N sound   Esc quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
         if self.show_inv or self.loot:                       # the menus take over the whole screen, DOS-style
             self.draw_menu()
+        if getattr(self, "build_menu", False):
+            self.draw_build_menu()
 
     def draw_menu(self):
         """the inventory / pick-up menus: a full DOS text screen, Dungeon Crawl Stone Soup-style"""
