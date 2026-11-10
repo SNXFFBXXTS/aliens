@@ -14,7 +14,8 @@ from PIL import Image, ImageDraw, ImageFont
 from art import P, B, S, T, Painter, dark, mix
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
-W, H = 112, 70           # world map in tiles
+W, H = 224, 140          # world map in tiles (vast: ~9,000 x 5,600 cells)
+FEAT = 2.0               # how big land features are: biomes, mountains, forests (x2 = forests that go on and on)
 ZS = 40                  # local cells per world tile (one world-map square = one 40x40 zone)
 
 
@@ -73,15 +74,17 @@ class World:
     def raw(self, X, Y, oct):
         s = self.seed
         # warp the coordinates a little so borders wiggle instead of following the noise grid
+        X0, Y0 = X, Y
+        X, Y = X / FEAT, Y / FEAT                               # features are FEAT times bigger than they used to be
         X = X + (fbm(X / 7, Y / 7, 4, s + 50) - 0.5) * 7
         Y = Y + (fbm(X / 7, Y / 7, 4, s + 51) - 0.5) * 7
         e = fbm(X / 34, Y / 34, oct, s + 1)
-        dx, dy = (X / W - 0.5) * 2, (Y / H - 0.5) * 2
+        dx, dy = (X0 / W - 0.5) * 2, (Y0 / H - 0.5) * 2
         d = np.sqrt(dx * dx * 0.85 + dy * dy)
         e = e - d * d * 0.32
         v = np.zeros_like(X)
         for hx, hy in self.hot:
-            bump = np.exp(-((X - hx) ** 2 + (Y - hy) ** 2) / (2 * 3.2 ** 2))
+            bump = np.exp(-((X - hx / FEAT) ** 2 + (Y - hy / FEAT) ** 2) / (2 * 3.2 ** 2))
             e = e + 0.16 * bump
             v = np.maximum(v, bump)
         m = fbm(X / 22, Y / 22, oct, s + 2)
@@ -206,7 +209,7 @@ class World:
         self.towns = []
         for idx in np.argsort(-score, axis=None):
             y, x = divmod(int(idx), W)
-            if score[y, x] < 0 or len(self.towns) >= 13:
+            if score[y, x] < 0 or len(self.towns) >= 40:
                 break
             if all((x - a) ** 2 + (y - c) ** 2 > 10 ** 2 for a, c in self.towns):
                 self.towns.append((x, y))
@@ -215,7 +218,7 @@ class World:
         self.caves = [(x, y) for y, x in cand[:9]]
         cand = list(zip(*np.nonzero(np.isin(b, ["grass", "desert", "tundra", "ash", "salt", "fungal", "swamp"]))))
         rng.shuffle(cand)
-        self.ruins = [(x, y) for y, x in cand[:10] if (x, y) not in self.towns]
+        self.ruins = [(x, y) for y, x in cand[:30] if (x, y) not in self.towns]
 
     def roads(self):
         cost = {"grass": 1, "meadow": 1, "savanna": 1.2, "beach": 1.5, "forest": 2.2, "desert": 2, "badlands": 2.5, "salt": 1.5,

@@ -80,10 +80,20 @@ def opaque(size):
     return pygame.Surface(size, 0, 32, (0xFF0000, 0x00FF00, 0x0000FF, 0))
 
 
+def _draw_world_map(seed, folder):
+    """(runs in its own process) the world map picture, saved into the world's folder"""
+    from PIL import Image
+    wd = proto.World(seed)
+    img = weird.to_rgb(world8(wd, weird.Species(seed)))
+    tmp = os.path.join(folder, "worldmap.tmp.png")
+    Image.fromarray(np.ascontiguousarray(img)).save(tmp)
+    os.replace(tmp, os.path.join(folder, "worldmap.png"))
+
+
 class World:
     def __init__(self, seed):
         self.seed = seed
-        self.dir = os.path.join(ROOT, f"world-{seed}-z{CS}")     # zone size in the name: old saves don't clash
+        self.dir = os.path.join(ROOT, f"world-{seed}-z{CS}-w{proto.W}")   # sizes in the name: old saves don't clash
         os.makedirs(os.path.join(self.dir, "chunks"), exist_ok=True)
         self.wd = proto.World(seed)
         self.species = weird.Species(seed)
@@ -410,10 +420,36 @@ class World:
         return p.img, feats, fires, fsprites
 
     def world_map(self):
+        """the whole world as a picture: drawn once (in the background, at start), then kept in the world's folder"""
         if self.map_img is None:
-            img = weird.to_rgb(world8(self.wd, self.species))
-            self.map_img = pygame.image.frombuffer(np.ascontiguousarray(img).tobytes(), (img.shape[1], img.shape[0]), "RGB").copy()
+            path = os.path.join(self.dir, "worldmap.png")
+            if os.path.exists(path):
+                self.map_img = pygame.image.load(path).convert()
+            else:
+                p = getattr(self, "_map_proc", None)
+                if p:
+                    try:
+                        p.wait(timeout=20)                     # it's nearly done: wait for it
+                    except Exception:
+                        pass
+                if os.path.exists(path):
+                    self.map_img = pygame.image.load(path).convert()
+                else:
+                    img = weird.to_rgb(world8(self.wd, self.species))
+                    self.map_img = pygame.image.frombuffer(np.ascontiguousarray(img).tobytes(),
+                                                           (img.shape[1], img.shape[0]), "RGB").copy()
+                    pygame.image.save(self.map_img, path)
         return self.map_img
+
+    def start_world_map(self):
+        """begin drawing the world map in a separate process (so the game doesn't stutter) so M opens straight away"""
+        if os.path.exists(os.path.join(self.dir, "worldmap.png")) or getattr(self, "_map_proc", None):
+            return
+        import subprocess
+        code = (f"import sys; sys.path.insert(0, {os.path.dirname(os.path.abspath(__file__))!r}); "
+                f"import rl; rl._draw_world_map({self.seed}, {self.dir!r})")
+        self._map_proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.DEVNULL)
 
 
 class Game:
@@ -474,6 +510,8 @@ class Game:
             who = f"{self.char['name']}, {self.char['archetype'].lower()}, " if self.char else "You "
             self.say(who + ("come" if not self.char else "comes") + " down near a settlement. Smoke, but no voices. "
                      "(M world map, E search, I bag)")
+        if not getattr(self.w, "showcase", False):
+            self.w.start_world_map()
         self.here = self.w.cell(self.px, self.py)
         self.fx, self.fy = float(self.px), float(self.py)   # smooth position (cells); px, py = the cell you're in
         self.vx = self.vy = 0.0
