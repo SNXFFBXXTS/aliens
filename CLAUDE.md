@@ -118,6 +118,23 @@ First enemy: mobs.Hollowed ("hollowed colonist": a grey body kanji with 虚 for 
 wilds, try to surround you and lunge; their head rolls off when they die). Bestiary.species("hollow", n).
 Tests/promo: game/out/promo/arena.py (each power vs a pack), promo.py (records the promo video).
 
+## Camp, the director, animals (Nov 2026)
+- World is vast: proto.W,H = 224x140 areas, FEAT = 2 (biomes twice as big), 40 settlements, 30 ruins. World dir name
+  includes -w{W}. The world map picture is drawn by a separate python process at start (rl._draw_world_map) and kept
+  as worldmap.png (threads made the game stutter; fork deadlocked).
+- Building: B = build menu (items.BUILD recipes; DOS screen), letter picks, ghost shows green/red, Enter/E/click
+  builds, X takes down your own (half back). World.set_cell changes a square + rebuilds that zone image in the
+  background (World.stale). World.built_set() {(x,y): (code, what was there)} saved in built.json. Built crates get an
+  empty container. G gathers wood (1.2 s) near woody land. Furniture is drawn from World.furniture (any zone).
+- The director (Game.director, every world turn): the hollowed are NOT scattered any more; they're sent with a reason:
+  "hunt" (pack spawns 22-28 out of sight, always knows where you are, signs as it nears), "ambush" (hidden and still
+  ahead of you until you're within 4), "hello" (walks up, says a HELLO line, leaves; turns hostile only if hurt).
+  Mostly nothing near your own campfire (Game.in_camp). Encounter mobs ids start "enc" and aren't saved to chunks.
+  Game.threat() -> status line top-left: Quiet / Camp / Someone is coming / Watched / Danger near / Hunted.
+- Animals: mobs.SIZES tiny..huge (hp/atk scale, sprite scale), TEMPER adds curious (comes to look) and territorial
+  (turns hostile within 3). Calm small-ish ones are tameable: E next to one with food -> Game.tame (saved), it follows
+  you, attacks hostiles near you (咬), never hurt by your head, you walk past it.
+
 ## Performance notes
 Zoom levels 0.6-2.0 (0.5 was too slow). Fog drawn at quarter res and only in a box round your sight; zoomed view
 resized with a fast scale; darkness built at half size. ~12 ms/frame at 100%, ~25 ms at 60%.

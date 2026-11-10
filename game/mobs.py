@@ -35,7 +35,8 @@ NOUN = {"legs": ["crawler", "tick", "skitter", "beetle", "strider"], "wings": ["
         "blob": ["slug", "ooze", "blob", "lump"], "tall": ["stalker", "lurcher", "walker", "shambler"],
         "tentacle": ["maw", "grasper", "tendril", "squid"], "beast": ["hound", "boar", "lurk", "rat"],
         "fish": ["eel", "fin", "lurker", "gulper"]}
-TEMPER = ["hostile", "hostile", "timid", "timid", "neutral", "neutral"]
+TEMPER = ["hostile", "hostile", "timid", "timid", "curious", "neutral", "territorial"]
+SIZES = [("tiny ", 0.55, 2), ("small ", 0.8, 4), ("", 1.0, 5), ("large ", 1.45, 3), ("huge ", 2.1, 1)]
 COLOURS = ["blood", "eye", "bloom", "lumen", "ochre", "frost", "spore", "rust", "salt"]
 
 
@@ -112,8 +113,12 @@ class Species:
         self.name = adj[r.integers(len(adj))] + " " + NOUN[self.plan][r.integers(len(NOUN[self.plan]))]
         self.colour = COLOURS[r.integers(len(COLOURS))]
         self.temper = TEMPER[r.integers(len(TEMPER))]
-        self.hp = int(r.integers(6, 15))
-        self.atk = (int(r.integers(1, 4)), int(r.integers(3, 7)))
+        size, self.scale, _ = SIZES[int(r.choice(len(SIZES), p=[w / 15 for _, _, w in SIZES]))]
+        self.name = size + self.name
+        self.hp = max(2, int(r.integers(6, 15) * self.scale ** 1.6))
+        lo, hi = int(r.integers(1, 4)), int(r.integers(3, 7))
+        self.atk = (max(1, int(lo * self.scale)), max(1, int(hi * self.scale)))
+        self.tameable = self.temper in ("timid", "curious", "neutral") and self.scale <= 1.5
         self.defn = int(r.integers(0, 2))
         self.slow = r.random() < 0.3                              # moves every other turn
         self.sight = int(r.integers(5, 9))
@@ -133,7 +138,9 @@ class Hollowed:
         self.colour = "ash"
         self.temper = "hostile"
         self.hp = 24
-        self.atk = (2, 5)
+        self.atk = (1, 3)
+        self.atk_every = 2                                 # swings every other turn
+        self.scale, self.tameable = 1.0, False
         self.defn = 0
         self.slow = False
         self.sight = 12
@@ -189,15 +196,6 @@ def spawn(best, cells, cx, cy, cs, tier, seed):
     want = r.choice([[0, 0, 0, 0, 1, 1, 2], [0, 0, 1, 1, 2, 2, 3], [0, 1, 1, 2, 2, 3, 4]][min(tier, 2)])
     if np.isin(cells, ["plaza", "house", "hwall", "hdoor", "sdoor", "bonfire"]).any():
         want = 0                                   # nothing nasty wanders round town (or its houses)
-    if want and r.random() < 0.35:                 # a pack of the hollowed, somewhere in the open
-        for k in range(int(r.integers(3, 6))):
-            for _ in range(10):
-                x, y = int(r.integers(cs)), int(r.integers(cs))
-                b = str(cells[y, x])
-                if b not in NO_WALK and b not in WATER and not b.startswith(("p_", "f_")) and b not in ("bridge",):
-                    out.append(Mob(best.species("hollow", int(r.integers(6))), 0, tier, cx * cs + x, cy * cs + y,
-                                   f"{cx}.{cy}.h{k}"))
-                    break
     for k in range(int(want) * 6):
         if len(out) >= want:
             break

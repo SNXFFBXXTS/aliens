@@ -188,7 +188,7 @@ class World:
 
     def write_chunk(self, cx, cy):
         p = self.path(cx, cy)
-        here = [m.to_json() for m in list(self.mobs.values()) if m.x // CS == cx and m.y // CS == cy]
+        here = [m.to_json() for m in list(self.mobs.values()) if not m.id.startswith("enc") and m.x // CS == cx and m.y // CS == cy]
         with open(p + ".tmp", "w") as f:
             seen = [int(sum(1 << i for i in range(CS) if row[i])) for row in self.seen[(cx, cy)]]
             json.dump({"cells": self.codes[(cx, cy)].tolist(), "mobs": here, "seen": seen}, f)
@@ -520,6 +520,9 @@ class Game:
         self.head_out, self.head_ready, self.shots, self.rings, self.zaps = None, 0.0, [], [], []
         self.parts, self.pops, self.clouds, self.shake, self.freeze_until, self.flash_fx = [], [], [], 0.0, 0.0, None
         self.mob_fx = {}                    # mob id -> {"stun": turns, "poison": turns}
+        self.intent, self.hello, self.speech = {}, {}, []    # why each sent creature is here; greeters; what they said
+        self.next_enc, self.enc_n, self.hunt_signs = 40, 0, set()
+        self.tame = set()                   # creature ids that are yours now
         self.mob_pos = {}                   # mob id -> where it's drawn (eases towards its square)
         self.size = self.load_settings().get("size", 0.55)   # how big people and creatures are next to the scenery
         self.sizer = False                  # the size slider is showing
@@ -543,6 +546,7 @@ class Game:
             self.hp = st.get("hp", self.maxhp)
             self.inv = {k: v for k, v in st.get("inv", {}).items() if k in items.ITEMS}
             self.food, self.water = st.get("food", 100.0), st.get("water", 100.0)
+            self.tame = set(st.get("tame", []))
             self.weapon = st.get("weapon") if st.get("weapon") in self.inv else None
             self.w.dead = set(st.get("dead", []))
             self.px, self.py = st["px"], st["py"]
@@ -626,25 +630,34 @@ class Game:
             out.blit(body, (1, 1))
             self.mob_img[k] = out
         if k not in self.mob_img:
-            pal = weird.palette(0)
-            spr = m.sp.sprite
-            img = np.zeros((T, T, 3), np.uint8)
-            img[spr == "1"] = pal[weird.F(m.sp.colour, 6)]
-            img[spr == "2"] = pal[weird.F(m.sp.colour, 3)]
-            img[spr == "3"] = (255, 70, 60) if m.angry else (240, 240, 200)
-            img[(img == 0).all(-1) & (spr != ".")] = (1, 1, 1)
-            body = spr != "."
-            img[body] = np.clip(img[body].astype(int) * 1.5 + 25, 0, 255).astype(np.uint8)   # lifted out of the gloom
-            s = pygame.image.frombuffer(img.tobytes(), (T, T), "RGB").copy()
-            s.set_colorkey((0, 0, 0))
-            s = pygame.transform.scale(s, (PX, PX)).convert_alpha()
-            rim = pygame.mask.from_surface(s).to_surface(setcolor=(210, 200, 190, 110), unsetcolor=(0, 0, 0, 0))
-            out = pygame.Surface((PX, PX), pygame.SRCALPHA)
-            for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):    # a faint outline so they read in the dark
-                out.blit(rim, (ox, oy))
-            out.blit(s, (0, 0))
-            self.mob_img[k] = out
+            self.mob_img[k] = self._animal_sprite(m)
+            sc = getattr(m.sp, "scale", 1.0)                 # tiny to huge
+            if sc != 1.0:
+                im_ = self.mob_img[k]
+                self.mob_img[k] = pygame.transform.smoothscale(im_, (max(4, int(im_.get_width() * sc)),
+                                                                     max(4, int(im_.get_height() * sc))))
         return self.mob_img[k]
+
+    def _animal_sprite(self, m):
+        """an animal's sprite from its species' pixel plan"""
+        pal = weird.palette(0)
+        spr = m.sp.sprite
+        img = np.zeros((T, T, 3), np.uint8)
+        img[spr == "1"] = pal[weird.F(m.sp.colour, 6)]
+        img[spr == "2"] = pal[weird.F(m.sp.colour, 3)]
+        img[spr == "3"] = (255, 70, 60) if m.angry else (240, 240, 200)
+        img[(img == 0).all(-1) & (spr != ".")] = (1, 1, 1)
+        body = spr != "."
+        img[body] = np.clip(img[body].astype(int) * 1.5 + 25, 0, 255).astype(np.uint8)   # lifted out of the gloom
+        s = pygame.image.frombuffer(img.tobytes(), (T, T), "RGB").copy()
+        s.set_colorkey((0, 0, 0))
+        s = pygame.transform.scale(s, (PX, PX)).convert_alpha()
+        rim = pygame.mask.from_surface(s).to_surface(setcolor=(210, 200, 190, 110), unsetcolor=(0, 0, 0, 0))
+        out = pygame.Surface((PX, PX), pygame.SRCALPHA)
+        for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):    # a faint outline so they read in the dark
+            out.blit(rim, (ox, oy))
+        out.blit(s, (0, 0))
+        return out
 
     def start_spot(self):
         tx, ty = self.w.home
@@ -730,7 +743,7 @@ class Game:
         with open(self.state_path() + ".tmp", "w") as f:
             json.dump({"px": self.px, "py": self.py, "hp": self.hp, "lvl": self.lvl, "xp": self.xp, "turn": self.turn,
                        "dead": sorted(self.w.dead), "inv": self.inv, "food": round(self.food, 1),
-                       "water": round(self.water, 1), "weapon": self.weapon}, f)
+                       "water": round(self.water, 1), "weapon": self.weapon, "tame": sorted(self.tame)}, f)
         os.replace(self.state_path() + ".tmp", self.state_path())
         if not self.w.showcase:
             with open(os.path.join(ROOT, "current.json"), "w") as f:
@@ -844,8 +857,8 @@ class Game:
 
     def damage_mob(self, m, d, how="hit", quiet=False, power=None):
         """hurt a creature (anime-style: sparks, a number, a jolt); kill it, give xp and level up if it dies"""
-        if m.id not in self.w.mobs:
-            return
+        if m.id not in self.w.mobs or (m.id in self.tame and power is not None):
+            return                                             # your head never hurts your own animals
         fx = self.mob_fx.get(m.id, {})
         x, y = m.x + 0.5, m.y + 0.3
         if fx.get("frozen") and power != "frost":             # frozen things shatter
@@ -855,6 +868,8 @@ class Game:
             self.popup(x, y - 0.8, "砕", (190, 230, 255), big=True)
         if not m.angry:
             m.angry = True
+        if self.intent.get(m.id) in ("hello", "ambush"):
+            self.intent[m.id] = "hunt"
         m.hp -= d
         self.flash[m.id] = time.monotonic()
         col = self.INK.get(power, (240, 230, 210))
@@ -895,7 +910,7 @@ class Game:
         near_hostile = False
         for m in list(self.w.mobs.values()):
             dist = max(abs(m.x - self.px), abs(m.y - self.py))
-            if dist > ACTIVE:
+            if dist > ACTIVE and self.intent.get(m.id) != "hunt":
                 continue
             if not m.seen and (m.x, m.y) in self.vis:
                 m.seen = True
@@ -919,16 +934,41 @@ class Game:
                 if fx.get("stun", 0) > 0:
                     fx["stun"] -= 1
                     continue
+            if self.act_with_intent(m, dist, occupied):
+                continue
             if m.sp.slow and self.turn % 2:
                 continue
             target = None
+            if m.id in self.tame:                              # your animal: guards you, follows you
+                foes = [o for o in self.w.mobs.values() if o.angry and o.id not in self.tame and
+                        max(abs(o.x - self.px), abs(o.y - self.py)) <= 7]
+                if foes:
+                    f = min(foes, key=lambda o: max(abs(o.x - m.x), abs(o.y - m.y)))
+                    if max(abs(f.x - m.x), abs(f.y - m.y)) <= 1:
+                        lo, hi = m.dmg()
+                        self.damage_mob(f, random.randint(lo, hi) + 2, "", power=None)
+                        self.popup(f.x + 0.5, f.y - 0.4, "咬", (240, 200, 160))
+                        continue
+                    target = mobs.step_towards(m, f.x, f.y, self.w.cell, occupied)
+                elif dist > 2:
+                    target = mobs.step_towards(m, self.px, self.py, self.w.cell, occupied)
+                if target:
+                    occupied.discard((m.x, m.y)); m.x, m.y = target; occupied.add(target)
+                continue
+            if dist == 1 and m.angry and getattr(m.sp, "atk_every", 1) > 1 and (self.turn + hash(m.id)) % m.sp.atk_every:
+                continue                                       # gathering itself for the next swing
+            if m.sp.temper == "territorial" and not m.angry and dist <= 3:
+                m.angry = True
+                self.say(f"The {m.name} doesn't want you this close.")
+                self.popup(m.x + 0.5, m.y - 0.6, "怒", (230, 90, 60), big=True)
             if dist == 1 and m.angry:
                 self.hurt_by(m)
                 near_hostile = True
                 if self.dead:
                     return
                 continue
-            if m.angry and dist <= m.sp.sight and getattr(m.sp, "pack", False) and dist > 2:
+            sight = 60 if self.intent.get(m.id) == "hunt" else m.sp.sight      # hunters know where you are
+            if m.angry and dist <= sight and getattr(m.sp, "pack", False) and dist > 2:
                 a_ = (hash(m.id) % 8) * math.pi / 4                # pack: each heads for its own side of you
                 target = mobs.step_towards(m, self.px + round(math.cos(a_) * 1.5), self.py + round(math.sin(a_) * 1.5),
                                            self.w.cell, occupied)
@@ -936,11 +976,13 @@ class Game:
                 if target and dist > 3 and random.random() < 0.35:   # and lunges
                     occupied.discard((m.x, m.y)); m.x, m.y = target; occupied.add(target)
                     target = mobs.step_towards(m, self.px, self.py, self.w.cell, occupied)
-            elif m.angry and dist <= m.sp.sight:
+            elif m.angry and dist <= sight:
                 target = mobs.step_towards(m, self.px, self.py, self.w.cell, occupied)
                 near_hostile = True
             elif m.sp.temper == "timid" and dist <= m.sp.sight:
                 target = mobs.step_towards(m, self.px, self.py, self.w.cell, occupied, away=True)
+            elif m.sp.temper == "curious" and dist <= m.sp.sight and dist > 2 and random.random() < 0.6:
+                target = mobs.step_towards(m, self.px, self.py, self.w.cell, occupied)   # comes to have a look
             elif random.random() < 0.3:
                 tx, ty = m.x + random.randint(-3, 3), m.y + random.randint(-3, 3)
                 target = mobs.step_towards(m, tx, ty, self.w.cell, occupied)
@@ -964,6 +1006,7 @@ class Game:
                 self.killer = "hunger" if self.food <= 0 else "thirst"
                 self.say("You collapse.")
                 return
+        self.director()
         fed = self.food > 20 and self.water > 20
         if fed and not near_hostile and self.turn % 8 == 0 and self.hp < self.maxhp:
             self.hp += 1
@@ -1150,6 +1193,8 @@ class Game:
             hit = None
             for q in self.box_cells(nfx, nfy) - old:
                 m = self.w.mob_at(*q)
+                if m and m.id in self.tame:
+                    continue                                   # you step round your own animal
                 if m:
                     hit = ("mob", m)
                     break
@@ -1216,8 +1261,33 @@ class Game:
     METAL = {"f_fridge", "f_stove", "f_barrel", "f_sink", "f_drum", "f_bucket", "f_wbarrel", "p_barrel", "p_car", "p_truck", "p_hull", "p_pod", "p_panel",
              "p_scrap"}
 
+    def animal_near(self):
+        """a calm, tameable creature within arm's reach"""
+        return next((m for m in self.w.mobs.values() if getattr(m.sp, "tameable", False) and not m.angry and
+                     m.id not in self.tame and max(abs(m.x - self.px), abs(m.y - self.py)) <= 1), None)
+
+    def feed(self, m):
+        food = next((k for k in ("jerky", "fruit", "bread", "beans") if self.inv.get(k)), None)
+        if not food:
+            self.say(f"The {m.name} sniffs your empty hands.")
+            return
+        self.inv[food] -= 1
+        if not self.inv[food]:
+            del self.inv[food]
+        if random.random() < (0.75 if m.sp.temper == "curious" else 0.5):
+            self.tame.add(m.id)
+            self.say(f"The {m.name} eats from your hand. It decides to stay with you.")
+            self.popup(m.x + 0.5, m.y - 0.7, "友", (250, 200, 170), big=True)
+            self.amb.fx("found", 1.2)
+        else:
+            self.say(f"The {m.name} snatches the {items.ITEMS[food][0]} and backs off. Maybe next time.")
+
     def start_search(self):
         if self.dead or self.show_map or self.searching:
+            return
+        a_ = self.animal_near()
+        if a_ and not self.container_near():
+            self.feed(a_)
             return
         q = self.container_near()
         if not q:
@@ -1962,6 +2032,154 @@ class Game:
         S.blit(bg, (X + PX // 2 - bg.get_width() // 2, Y - 22))
         S.blit(img, (X + PX // 2 - img.get_width() // 2, Y - 20))
 
+    # ── the director: the changed come for a reason, or not at all ──
+    HELLO = ["You've still got your head on. That won't last.", "We kept the fire going for you.",
+             "Did you hear it too? It says your name wrong.", "Come and sit with us. Everyone's sitting.",
+             "Don't go north. North goes on.", "It looked at me once. I liked it.",
+             "You came down in the ship. We remember the ship.", "Your head's very loud. Is it always that loud?",
+             "We're not hungry. Not for that.", "The trees moved closer last night. Did you notice?"]
+
+    def camp_fires(self):
+        return [xy for xy, (c, _) in self.w.built_set().items() if c == "bonfire"]
+
+    def in_camp(self):
+        return any(math.hypot(x - self.px, y - self.py) <= 12 for x, y in self.camp_fires())
+
+    def spawn_spot(self, lo, hi, ahead=False):
+        """somewhere you can't see, lo..hi squares away (in front of you if ahead)"""
+        fx_, fy_ = getattr(self, "facing", (0, 1))
+        for _ in range(60):
+            if ahead:
+                a = math.atan2(fy_, fx_) + random.uniform(-0.6, 0.6)
+            else:
+                a = random.uniform(0, 2 * math.pi)
+            d = random.uniform(lo, hi)
+            x, y = self.px + int(round(math.cos(a) * d)), self.py + int(round(math.sin(a) * d))
+            c = self.w.cell(x, y)
+            if (x, y) not in self.vis and not self.blocked(x, y) and c not in weird.WATER and not self.w.mob_at(x, y) \
+                    and c not in ("mud", "bonfire", "plaza"):
+                return x, y
+        return None
+
+    def send(self, kind, n, spot, angry):
+        out = []
+        x0, y0 = spot
+        for j in range(n):
+            for _ in range(12):
+                x, y = x0 + random.randint(-2, 2), y0 + random.randint(-2, 2)
+                if not self.blocked(x, y) and not self.w.mob_at(x, y) and self.w.cell(x, y) not in weird.WATER:
+                    self.enc_n += 1
+                    tier = self.w.tier(self.px // CS, self.py // CS)
+                    m = mobs.Mob(self.w.best.species("hollow", random.randrange(6)), 0, tier, x, y, f"enc{self.enc_n}")
+                    m.angry = angry
+                    self.w.mobs[m.id] = m
+                    self.intent[m.id] = kind
+                    out.append(m)
+                    break
+        return out
+
+    def director(self):
+        """every world turn: maybe something comes. Hunt, lie in wait, or just say hello."""
+        for mid in [k for k in self.intent if k not in self.w.mobs]:   # the dead and gone
+            self.intent.pop(mid, None)
+            self.hello.pop(mid, None)
+        for m in list(self.w.mobs.values()):                  # far away: they've gone back where they came from
+            if m.id in self.intent and max(abs(m.x - self.px), abs(m.y - self.py)) > 55:
+                self.w.mobs.pop(m.id, None)
+        hunting = [m for m in self.w.mobs.values() if self.intent.get(m.id) == "hunt"]
+        if not hunting and "hunt" in self.hunt_signs:
+            self.hunt_signs.clear()
+            self.say("It's quiet again. For now.")
+        for m in hunting:                                      # signs as they close in
+            d = math.hypot(m.x - self.px, m.y - self.py)
+            if d < 14 and "near" not in self.hunt_signs:
+                self.hunt_signs.add("near")
+                self.say("You hear them in the trees now. More than one.")
+            if d < 6 and "here" not in self.hunt_signs:
+                self.hunt_signs.add("here")
+                self.say("They're here.")
+        if self.turn < self.next_enc or any(self.intent.get(m.id) in ("hunt", "hello") for m in self.w.mobs.values()):
+            return
+        night = self.clock()[1] in ("Dusk", "Night")
+        tier = self.w.tier(self.px // CS, self.py // CS)
+        self.next_enc = self.turn + random.randint(110, 260)
+        if self.in_camp():                                    # your fire keeps most things back
+            roll = random.choices(["none", "hello", "hunt"], [70, 20, 10 if night else 0])[0]
+        elif night:
+            roll = random.choices(["none", "hunt", "ambush", "hello"], [15, 50, 25, 10])[0]
+        else:
+            roll = random.choices(["none", "hunt", "ambush", "hello"], [25, 15 + 5 * tier, 30, 30])[0]
+        if roll == "hunt":
+            spot = self.spawn_spot(22, 28)
+            if spot:
+                self.send("hunt", min(7, 3 + tier + (1 if night else 0)), spot, angry=True)
+                self.hunt_signs = {"hunt"}
+                self.say("Far behind you, something starts to follow.")
+        elif roll == "ambush":
+            spot = self.spawn_spot(9, 15, ahead=True)
+            if spot:
+                self.send("ambush", random.randint(2, 4), spot, angry=False)
+        elif roll == "hello":
+            spot = self.spawn_spot(14, 18)
+            if spot:
+                for m in self.send("hello", 1, spot, angry=False):
+                    self.hello[m.id] = {"phase": "come", "t": 0}
+
+    def act_with_intent(self, m, dist, occupied):
+        """the sent ones don't wander: returns True if it has been dealt with"""
+        it = self.intent.get(m.id)
+        if it == "ambush":
+            if dist <= 4:                                      # sprung
+                self.intent[m.id] = "hunt"
+                m.angry = True
+                if "sprung" not in self.hunt_signs:
+                    self.hunt_signs |= {"hunt", "sprung"}
+                    self.say("They were waiting for you.")
+                    self.juice(shake=5, flash=(120, 20, 20))
+                self.popup(m.x + 0.5, m.y - 0.6, "襲", (230, 60, 50), big=True)
+            return True                                        # until then: utterly still
+        if it == "hello":
+            h = self.hello.setdefault(m.id, {"phase": "come", "t": 0})
+            target = None
+            if h["phase"] == "come":
+                if dist <= 2:
+                    h["phase"], h["t"] = "talk", 0
+                    line = random.choice(self.HELLO)
+                    self.speech.append((m.id, line, time.monotonic()))
+                    self.say(f"The {m.name} says: \"{line}\"")
+                elif random.random() < 0.7:                    # slow, steady, not quite walking right
+                    target = mobs.step_towards(m, self.px, self.py, self.w.cell, occupied)
+            elif h["phase"] == "talk":
+                h["t"] += 1
+                if h["t"] > 9:
+                    h["phase"] = "go"
+            else:
+                target = mobs.step_towards(m, self.px, self.py, self.w.cell, occupied, away=True)
+                if dist > 24:
+                    self.w.mobs.pop(m.id, None)
+            if target:
+                occupied.discard((m.x, m.y))
+                m.x, m.y = target
+                occupied.add(target)
+            return True
+        return False
+
+    def threat(self):
+        """what the status line says: (colour, text)"""
+        hunt = [math.hypot(m.x - self.px, m.y - self.py) for m in self.w.mobs.values() if self.intent.get(m.id) == "hunt"]
+        if hunt:
+            return ((230, 70, 60), "Hunted. They're close." if min(hunt) < 10 else "Hunted. Something is following you.")
+        if any(m.angry and math.hypot(m.x - self.px, m.y - self.py) < 12 for m in self.w.mobs.values()):
+            return ((230, 120, 60), "Danger near.")
+        if any(self.intent.get(m.id) == "ambush" and math.hypot(m.x - self.px, m.y - self.py) < 13
+               for m in self.w.mobs.values()):
+            return ((220, 180, 80), "Watched. You can't see by what.")
+        if any(self.intent.get(m.id) == "hello" for m in self.w.mobs.values()):
+            return ((190, 190, 210), "Someone is coming. They don't seem to want a fight.")
+        if self.in_camp():
+            return ((140, 210, 140), "Camp. Your fire keeps them back.")
+        return ((120, 190, 130), "Quiet. Nothing near.")
+
     def enter(self, x, y):
         before = len(self.w.visited)
         self.px, self.py = x, y
@@ -2302,21 +2520,36 @@ class Game:
             sx, sy = sx + (m.x - sx) * k, sy + (m.y - sy) * k
             self.mob_pos[m.id] = (sx, sy)
             x, y = int(sx * PX) - cxp, int(sy * PX) - cyp + top
+            if self.intent.get(m.id) == "ambush" and max(abs(m.x - self.px), abs(m.y - self.py)) > 2:
+                continue                                       # lying in wait: you don't see them
             if (m.x, m.y) in self.vis and -PX < x < sw and top - PX < y < top + vh:
                 fx_, fy_ = x + PX // 2, y + PX - 4                  # where its feet are
                 sh = self.sized("foot", self.foot_shadow())
                 S.blit(sh, (fx_ - sh.get_width() // 2, fy_ - sh.get_height() // 2 - 1))
-                spr = self.sized(("mob",) + (m.biome, m.n, m.angry), self.mob_sprite(m))
+                spr = self.sized(("mob", m.biome, m.n, m.angry), self.mob_sprite(m))
                 if now - self.flash.get(m.id, 0) < 0.15:
                     spr = spr.copy(); spr.fill((255, 255, 255), special_flags=pygame.BLEND_RGB_MAX)
                 w_, h_ = spr.get_size()
                 jit = random.randint(-1, 1) if getattr(m.sp, "glyph", None) and random.random() < 0.3 else 0   # twitching
                 S.blit(spr, (fx_ - w_ // 2 + jit, fy_ + 4 - h_))
+                if m.id in self.tame:                           # yours
+                    import charcreate
+                    mk = charcreate.glyph("友", 14, (250, 200, 170))
+                    S.blit(mk, (fx_ - mk.get_width() // 2, fy_ + 4 - h_ - 18))
                 if m.hp < m.maxhp:
                     bw, by = max(8, w_ - 4), fy_ + 4 - h_ - 4
                     pygame.draw.rect(S, (60, 0, 0), (fx_ - bw // 2, by, bw, 3))
                     pygame.draw.rect(S, (230, 50, 50), (fx_ - bw // 2, by, int(bw * m.hp / m.maxhp), 3))
         self._last_draw = now
+        self.speech = [sp for sp in self.speech if now - sp[2] < 5 and sp[0] in self.w.mobs]
+        for mid, line, t_ in self.speech:                      # what the greeter said, over its head
+            m = self.w.mobs[mid]
+            X, Y = int(m.x * PX) - cxp + PX // 2, int(m.y * PX) - cyp + top - int(PX * 1.2)
+            img = self.small.render(line, True, (225, 222, 232))
+            bg = pygame.Surface((img.get_width() + 14, img.get_height() + 8), pygame.SRCALPHA)
+            bg.fill((8, 6, 10, 215))
+            S.blit(bg, (X - bg.get_width() // 2, Y - bg.get_height()))
+            S.blit(img, (X - img.get_width() // 2, Y - bg.get_height() + 4))
         self.draw_doors(S, top, cxp, cyp, sw, vh, c0x, c0y, c1x, c1y)
         self.draw_fog(S, top, cxp, cyp, sw, vh, t)
         S.blit(self.darkness(cxp, cyp, sw, vh), (-(cxp % PX), top - (cyp % PX)))
@@ -3016,6 +3249,15 @@ class Game:
             self.screen.blit(bg, (8, y0))
             self.screen.blit(charcreate.glyph(self.headinfo["glyph"], 20, col), (14, y0 + 1))
             self.screen.blit(self.font.render(f"{P['name']}   {state}   (F / right-click)", True, col), (42, y0 + 4))
+        if not self.show_map and not self.sizer:
+            col, txt = self.threat()
+            img = self.font.render(txt, True, col)
+            bg = pygame.Surface((img.get_width() + 30, 26), pygame.SRCALPHA)
+            bg.fill((8, 6, 10, 190))
+            self.screen.blit(bg, (8, HUD_H + 8))
+            pulse = 4 + (2 * abs(math.sin(time.monotonic() * 4)) if col[0] > 200 and col[1] < 150 else 0)
+            pygame.draw.circle(self.screen, col, (20, HUD_H + 21), int(pulse))
+            self.screen.blit(img, (32, HUD_H + 12))
         if self.sizer and not self.show_map:
             self.draw_sizer()
 
