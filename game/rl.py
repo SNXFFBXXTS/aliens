@@ -3396,6 +3396,7 @@ def main():
         import charcreate                                # the game opens on character creation
         ch = charcreate.run(screen, ROOT)
         if not ch:
+            quiet_exit()
             pygame.quit()
             return
         args.append("--new")                             # a new character gets a new world
@@ -3439,9 +3440,24 @@ def main():
         g.update(min(0.05, clock.get_time() / 1000))
         g.frame()
         clock.tick(60)
+    quiet_exit()                                         # sound off and window gone straight away...
     if not g.dead:
-        g.save()
+        g.save()                                         # ...then save (it can take a moment in a big world)
+    p = getattr(g.w, "_map_proc", None)
+    if p and p.poll() is None:
+        p.terminate()                                    # an unfinished world map is just redrawn next time
     pygame.quit()
+
+
+def quiet_exit():
+    """stop every sound and close the window, so nothing carries on while the game shuts down"""
+    try:
+        if pygame.mixer.get_init():
+            pygame.mixer.stop()
+            pygame.mixer.quit()
+    except pygame.error:
+        pass
+    pygame.display.quit()
 
 
 if __name__ == "__main__":
