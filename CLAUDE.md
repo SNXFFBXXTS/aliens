@@ -7,11 +7,11 @@ Original goal: standalone 2D roguelike, Caves of Qud-inspired *look* (own art, n
 huge generated world, thousands of spells/items, towns, shops, roads; places are random until visited, then permanent.
 
 ## Direction
-See DIRECTION.md (Nov 2026): creepy derelict colony planet, changed colonists, the planet's eye, sanity that
+Work tracking: ROADMAP.md (bugs + features, one at a time, each with a "done when"). See DIRECTION.md (Nov 2026): creepy derelict colony planet, changed colonists, the planet's eye, sanity that
 lies, shanties + decay, permadeath. Work order: look first (milestone 1), then systems. 70s Essex estates are being dropped.
 
 ## Run
-`rl` opens character creation (charcreate.py: 30 archetypes + make-your-own builder, spar with a dummy);
+`rl` opens character creation (charcreate.py: 47 archetypes in 5 groups (Drift, Zomboid, RimWorld, Qud, Severed) + make-your-own builder, spar with a dummy);
 Enter makes a NEW world and plays as that character (symbol + gear glyphs, stats drive HP/hit/dodge/damage,
 moves animate on attack). `rl --play` continues the current world with ~/.local/share/roguelike/character.json.
 Launcher: `rl` (launcher `~/.local/bin/rl` -> `python3 game/rl.py`), `rl --new`, `rl --seed N`. Needs `python-pygame`.
@@ -30,12 +30,12 @@ Headless test: `RL_HOME=/tmp/x SDL_VIDEODRIVER=dummy python3 game/rl.py --seed 1
 - `art.py` old palette/bitmaps (hero sprite still comes from here).
 
 ## Look (current)
-Zones: 1 world square = 40x40 cells (proto.ZS), world map = travel screen (M, arrows, M/Enter zooms in).
+Zones: 1 world square = 40x40 cells (proto.ZS), world map (M) only LOOKS: arrows move a cursor (Game.map_cur), you never move while it's open (user).
 Art drawn at 2x (weird.RES, 32px cells); trees/huts/peaks/shards are BIG (weird.BIG, up to 64px) and drawn after
 the ground: all shadows first (weird.SHADE darkens, never blackens), then bodies back to front; trees from
 neighbouring zones that lean over the border are drawn too (weird.pick_big). Ground = dark grainy tint of the
-biome colour. All-round vision (rl.update_view, line of sight; the Zomboid cone was removed at the user's request), soft darkness edges
-(smoothscale). Sound minimal and quiet (immersion.SOUND_VERSION; one bed per zone, not per step).
+biome colour. Vision is Caves of Qud style (user): the WHOLE screen is visible, no line of sight (rl.update_view makes self.vis the
+viewport box; World.remember_rect). Darkness = one even day/night tint capped at alpha 120 + your carried light at night. Sound minimal and quiet (immersion.SOUND_VERSION; one bed per zone, not per step).
 User wants: minimal but immersive, sparse dim trees, no wading through rivers/lakes.
 
 ## Movement (real time)
@@ -136,6 +136,12 @@ Tests/promo: game/out/promo/arena.py (each power vs a pack), promo.py (records t
   you, attacks hostiles near you (咬), never hurt by your head, you walk past it.
 
 ## Performance notes
+Zone pictures: World.build_inputs (zone + 3-cell margin, main side) -> zonepaint.paint_zone (pure; same inputs = same
+pixels) in 2 forkserver worker processes (rl.make_pool, RL_NOPROC=1 = paint in-process). Two builder threads take the
+pending zone nearest World.focus (your position + 1.5 s of velocity). A zone the game needs RIGHT NOW is painted
+in-process (build(here=True)). Workers trace roads themselves (World.lines only overridden by showcase). World.close()
+kills the workers on exit. Anything iterating World.codes/mobs must snapshot (list(...)): builder threads add zones.
+Test scripts that import rl must use an if __name__ == "__main__" guard (forkserver re-imports the main script).
 Zoom levels 0.6-2.0 (0.5 was too slow). Fog drawn at quarter res and only in a box round your sight; zoomed view
 resized with a fast scale; darkness built at half size. ~12 ms/frame at 100%, ~25 ms at 60%.
 Line of sight only recomputed when position/light changes (update_view vkey); darkness overlay keyed on what it shows

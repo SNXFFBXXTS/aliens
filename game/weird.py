@@ -1296,6 +1296,9 @@ def flow_bands(p, B, m, cs, seed, ox=0, oy=0, roads=(), trails=()):
     """roads and footpaths along their real routes (a defined worn middle, edges that fray and fade into
     the land), plus cobbled squares and brick lanes in towns. B = cell codes of the zone plus an m-cell
     margin; ox, oy = the zone's top-left in world pixels; roads/trails = centre lines in zone pixels."""
+    has_town = bool(np.isin(B, ["plaza", "house", "bonfire"]).any())
+    if not len(trails) and not len(roads) and not has_town:
+        return                                           # wild land: nothing to wear into it (and this pass is costly)
     rng = np.random.default_rng(seed)
     H, W = p.img.shape
     g = rng.random((H, W))
@@ -1345,6 +1348,8 @@ def flow_bands(p, B, m, cs, seed, ox=0, oy=0, roads=(), trails=()):
                     p.img[np.clip(ys[k] + dy, 0, H - 1), np.clip(xs[k] + dx, 0, W - 1)] = col
 
     # towns: cobbled squares and brick lanes (from the town's cells)
+    if not has_town:
+        return
     ragged = (small - 0.5) * 0.11 + (g - 0.5) * 0.035
     rd = _up(_blur(np.isin(B, ROADLIKE).astype(float)), m, cs)
     town = _up(_blur(_blur(np.isin(B, ["plaza", "house", "bonfire"]).astype(float))), m, cs) > 0.05
@@ -1413,8 +1418,29 @@ def ground_pass(p, G, m, cs, seed, ox, oy):
     gh = grng.random((H, W), dtype=np.float32)
     gh2 = grng.random((H, W), dtype=np.float32)
     lumpy = None
+    # ordinary ground, every kind at once: a table of 5 shades per kind, each pixel picks kind x shade
+    special = lambda nm: nm in WATER or nm in ("lava", "crust", "seaice") or nm in BUILT
+    tab = np.zeros((len(names), 5), np.int64)
+    plain = np.zeros(len(names), bool)
     for k, nm in enumerate(names):
         nm = str(nm)
+        if not special(nm):
+            fam = BIOMES.get(nm, ("moss",))[0]
+            tab[k] = (F(fam, 0), F(fam, 1), F(fam, 2), F(fam, 3), F(fam, 4))
+            plain[k] = True
+    if plain.any():
+        shade = (gh >= 0.22).astype(np.int8) + (gh > 0.94)                  # 0 dark, 1 mid, 2 light
+        shade[gh2 > 0.982] = 3                                              # specks
+        shade[gh2 > 0.991] = 4
+        out = tab.ravel()[code * 5 + shade].astype(p.img.dtype)
+        if plain.all():
+            p.img[:] = out
+        else:
+            np.copyto(p.img, out, where=plain[code])
+    for k, nm in enumerate(names):
+        nm = str(nm)
+        if not special(nm):
+            continue
         msk = code == k
         if not msk.any():
             continue
@@ -1435,11 +1461,6 @@ def ground_pass(p, G, m, cs, seed, ox, oy):
             p.img[msk & (gh2 > 0.985)] = F("ice", 5)
         elif nm in BUILT:
             continue
-        else:
-            fam = BIOMES.get(nm, ("moss",))[0]
-            p.img[msk] = np.where(gh[msk] < 0.22, F(fam, 0), np.where(gh[msk] > 0.94, F(fam, 2), F(fam, 1)))
-            speck = msk & (gh2 > 0.982)
-            p.img[speck] = np.where(gh2[speck] > 0.991, F(fam, 4), F(fam, 3))
 
 
 def to_rgb(img8, t=0.0):

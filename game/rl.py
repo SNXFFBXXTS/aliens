@@ -14,7 +14,7 @@ The world is split into chunks (one world-map tile = 12 x 12 cells). A chunk is 
 it comes near you, then written to disk with the creatures living there, so it never changes after that.
 Saves: ~/.local/share/roguelike/
 """
-import json, math, os, queue, random, sys, threading, time, warnings
+import json, math, os, random, sys, threading, time, warnings
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 warnings.filterwarnings("ignore", message=".*avx2.*")
 import numpy as np
@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import proto                                           # noqa: E402
 import weird                                           # noqa: E402
+import zonepaint                                       # noqa: E402
 import mobs                                            # noqa: E402
 import immersion as im                                 # noqa: E402
 import structures                                      # noqa: E402
@@ -60,7 +61,7 @@ NAMES = {"deep": "Deep sea", "ocean": "Ocean", "shallow": "Shallows", "beach": "
          "shanty": "Settlement",
          "packed": "Packed earth", "scorch": "Scorched ground", "railh": "Railway", "railv": "Railway",
          "mosaic": "Mosaic floor"}
-UNDER = {"road", "trail", "plaza", "house", "bonfire", "bridge"}     # drawn as flowing bands over the land
+UNDER = zonepaint.UNDER                                 # drawn as flowing bands over the land
 BLOCKED = {"deep": "The water's too deep to swim.", "ocean": "The water's too deep to swim.",
            "mountain": "The rock face is too steep.", "peak": "The peak is too steep to climb.",
            "house": "Someone lives there.", "lava": "Lava! Far too hot to step in.",
@@ -90,6 +91,19 @@ def _draw_world_map(seed, folder):
     os.replace(tmp, os.path.join(folder, "worldmap.png"))
 
 
+def make_pool():
+    """two worker processes that paint zone pictures (RL_NOPROC=1 paints them in the game instead)"""
+    if os.environ.get("RL_NOPROC"):
+        return None
+    try:
+        import concurrent.futures, multiprocessing
+        ctx = multiprocessing.get_context("forkserver")      # (plain fork deadlocked with pygame + threads)
+        ctx.set_forkserver_preload(["zonepaint"])
+        return concurrent.futures.ProcessPoolExecutor(max_workers=2, mp_context=ctx)
+    except Exception:
+        return None
+
+
 class World:
     def __init__(self, seed):
         self.seed = seed
@@ -104,8 +118,13 @@ class World:
         self.lock = threading.Lock()            # guards self.ready
         self.clock_ = threading.RLock()         # guards making/loading zones (the background builder does it too)
         self.ready, self.queued = {}, set()
-        self.jobs = queue.Queue()
-        threading.Thread(target=self._worker, daemon=True).start()
+        self.pending, self.cv, self.focus = set(), threading.Condition(), None   # zones waiting to be drawn
+        self.pool = make_pool()                 # zone pictures are painted in other processes: no stutter here
+        if self.pool:
+            for _ in range(2):                  # wake the workers now (imports, this world's flora + roads)
+                self.pool.submit(zonepaint.warm, seed)
+        for _ in range(2 if self.pool else 1):
+            threading.Thread(target=self._worker, daemon=True).start()
         self.fsprites = {}                      # key -> (sprite, colours, kind)
         self.fires = set()                      # cells with flames in them
         self.seen = {}                          # chunk -> bool array of cells you've laid eyes on
@@ -116,6 +135,15 @@ class World:
 
     def inside(self, cx, cy):
         return 0 <= cx < proto.W and 0 <= cy < proto.H
+
+    def close(self):
+        """stop the zone painters (no leftover processes)"""
+        pool, self.pool = getattr(self, "pool", None), None
+        if pool is not None:
+            procs = list((getattr(pool, "_processes", None) or {}).values())
+            pool.shutdown(wait=False, cancel_futures=True)
+            for pr in procs:
+                pr.terminate()
 
     def tier(self, cx, cy):
         d = ((cx - self.home[0]) ** 2 + (cy - self.home[1]) ** 2) ** 0.5
@@ -195,7 +223,7 @@ class World:
         os.replace(p + ".tmp", p)
 
     def save(self):
-        for (cx, cy) in self.codes:
+        for (cx, cy) in list(self.codes):                    # (a snapshot: the builders add zones any time)
             if self.inside(cx, cy):
                 self.write_chunk(cx, cy)
         with open(os.path.join(self.dir, "built.json"), "w") as f:
@@ -232,9 +260,10 @@ class World:
         for cache in ("_houses", "_hbits", "_furn"):            # what was worked out about this zone is out of date
             if hasattr(self, cache):
                 getattr(self, cache).clear()
-        self.queued.discard(k)
-        self.queued.add(k)
-        self.jobs.put(k)
+        with self.cv:
+            self.queued.add(k)
+            self.pending.add(k)
+            self.cv.notify_all()
 
     def furniture(self, cx, cy):
         """every furniture square in a loaded zone, built or found: [(x, y, code)]"""
@@ -304,6 +333,16 @@ class World:
             self.chunk(x // CS, y // CS)
             self.seen[(x // CS, y // CS)][y % CS, x % CS] = True
 
+    def remember_rect(self, x0, y0, x1, y1):
+        """mark a whole box of cells as seen, one zone at a time"""
+        for zy in range(y0 // CS, (y1 - 1) // CS + 1):
+            for zx in range(x0 // CS, (x1 - 1) // CS + 1):
+                if (zx, zy) not in self.codes or (zx, zy) not in self.seen:
+                    continue                             # not loaded yet: never make a zone just to look at it
+                gx0, gy0 = max(x0, zx * CS), max(y0, zy * CS)
+                gx1, gy1 = min(x1, zx * CS + CS), min(y1, zy * CS + CS)
+                self.seen[(zx, zy)][gy0 - zy * CS:gy1 - zy * CS, gx0 - zx * CS:gx1 - zx * CS] = True
+
     def was_seen(self, x, y):
         a = self.seen.get((x // CS, y // CS))
         return a is not None and a[y % CS, x % CS]
@@ -323,7 +362,7 @@ class World:
             x0, y0 = cx * CS, cy * CS                        # its fires are re-found from the new build
             self.fires = {f for f in self.fires if not (x0 <= f[0] < x0 + CS and y0 <= f[1] < y0 + CS)}
         if done is None:
-            done = self.build(cx, cy)
+            done = self.build(cx, cy, here=True)
         img, feats, fires, fsprites = done
         self.feats[k] = feats
         self.fires |= fires
@@ -331,8 +370,10 @@ class World:
         s = pygame.image.frombuffer(img.tobytes(), (CS * weird.TS, CS * weird.TS), "P")
         s.set_palette([tuple(c) for c in weird.palette(0)])
         s = pygame.transform.scale(s, (CS * PX, CS * PX))
-        if len(self.surf) > 40:
-            self.surf.clear()
+        if len(self.surf) > 40:                          # full: forget the zones furthest from this one, not all of them
+            far = sorted(self.surf, key=lambda q: -max(abs(q[0] - cx), abs(q[1] - cy)))
+            for q in far[:len(self.surf) - 32]:
+                del self.surf[q]
         self.surf[k] = s
         return s
 
@@ -346,15 +387,28 @@ class World:
         return None
 
     def prefetch(self, zones):
-        """ask the background builder to get these zones ready"""
-        for k in zones:
-            if k not in self.surf and k not in self.ready and k not in self.queued and self.inside(*k):
-                self.queued.add(k)
-                self.jobs.put(k)
+        """ask the background builder to get these zones ready (the one nearest you is always drawn first)"""
+        with self.cv:
+            for k in zones:
+                if k not in self.surf and k not in self.ready and k not in self.queued and self.inside(*k):
+                    self.queued.add(k)
+                    self.pending.add(k)
+            self.cv.notify_all()
 
     def _worker(self):
         while True:
-            k = self.jobs.get()
+            with self.cv:
+                while not self.pending:
+                    self.cv.wait()
+                f = self.focus or next(iter(self.pending))      # (where you are, in zones, with the fraction)
+                d = lambda q: math.hypot(q[0] + 0.5 - f[0], q[1] + 0.5 - f[1])
+                for q in [q for q in self.pending if d(q) > 3]:      # you've moved on: don't bother with those
+                    self.pending.discard(q)
+                    self.queued.discard(q)
+                if not self.pending:
+                    continue
+                k = min(self.pending, key=d)
+                self.pending.discard(k)
             try:
                 if k not in self.surf or k in getattr(self, "stale", set()):
                     out = self.build(*k)
@@ -365,15 +419,10 @@ class World:
             finally:
                 self.queued.discard(k)
 
-    def build(self, cx, cy):
-        """draw a zone into a palette-index image (no pygame, so it can run in the background)"""
-        fires, fsprites = set(), {}
+    def build_inputs(self, cx, cy):
+        """what the painter needs: the zone plus a margin of its neighbours (so roads flow across borders), etc."""
         b = self.chunk(cx, cy)
-        p = weird.Painter8(CS, CS)
-        j, i = np.mgrid[0:CS, 0:CS]
-        R = proto.rnd_cells(cx * CS + i, cy * CS + j, self.seed + 99)
-        # the zone plus a margin of its neighbours, so roads flow smoothly across borders
-        M = 3
+        M = zonepaint.M
         B = np.empty((CS + 2 * M, CS + 2 * M), dtype="<U10")
         B[M:M + CS, M:M + CS] = b
         for y in range(-M, CS + M):
@@ -381,89 +430,23 @@ class World:
                 if not (0 <= x < CS and 0 <= y < CS):
                     gx, gy = cx * CS + x, cy * CS + y
                     B[y + M, x + M] = self.cell(gx, gy) if self.inside(gx // CS, gy // CS) else "deep"
-        # what the ground is made of under everything: paths, props and buildings stand on the land round them
-        G = B.copy()
-        for y in range(B.shape[0]):
-            for x in range(B.shape[1]):
-                c = B[y, x]
-                if c in UNDER or c.startswith("p_") or c.startswith("f_") or c in weird.BUILT:
-                    win = B[max(0, y - 2):y + 3, max(0, x - 2):x + 3].ravel()
-                    want = [w for w in win if (w in weird.WATER) == (c == "bridge") and w not in UNDER
-                            and not w.startswith("p_") and not w.startswith("f_") and w not in weird.BUILT]
-                    G[y, x] = max(set(want), key=want.count) if want else ("river" if c == "bridge" else "grass")
-        zseed = (cx * 7919 + cy * 104729 + self.seed) & 0xFFFFFFFF
-        weird.ground_pass(p, G, M, CS, zseed, cx * CS * weird.TS, cy * CS * weird.TS)
-        items = []
-        dens = self.density(cx, cy)
-        for y in range(CS):
-            for x in range(CS):
-                c = b[y, x]
-                if c.startswith("f_"):             # furniture (drawn live by the game) stands on the room's floor
-                    nbr = [B[y + M + oy, x + M + ox] for ox, oy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
-                    fl = [n for n in nbr if n in buildings.FLOORS]
-                    c = max(set(fl), key=fl.count) if fl else "hfloor"
-                if c in weird.WALLS:               # walls join up with the walls next to them
-                    W_ = weird.WALLS
-                    weird.built(p, x, y, c, R[y, x], nb=(B[y + M - 1, x + M] in W_, B[y + M + 1, x + M] in W_,
-                                                          B[y + M, x + M - 1] in W_, B[y + M, x + M + 1] in W_))
-                elif c in weird.BUILT:
-                    weird.built(p, x, y, c, R[y, x])
-                elif c in UNDER and c not in ("house", "bonfire"):
-                    continue
-                else:                              # trees, plants, props: the ground is already down
-                    if c == "p_fence":             # a fence running up the screen is drawn edge-on: skinny
-                        F_ = ("p_fence", "p_fencev")
-                        if (B[y + M - 1, x + M] in F_ or B[y + M + 1, x + M] in F_) and not (
-                                B[y + M, x + M - 1] in F_ or B[y + M, x + M + 1] in F_):
-                            c = "p_fencev"
-                    weird.paint(p, self.species, x, y, c, R[y, x], defer=items, mode="thing", mult=dens)
-        roads, trails = self.lines(cx, cy)
-        to_px = lambda L: [(pts - (cx, cy)) * CS * weird.TS for pts in L]
-        weird.flow_bands(p, B, M, CS, zseed,
-                         ox=cx * CS * weird.TS, oy=cy * CS * weird.TS, roads=to_px(roads), trails=to_px(trails))
-        # big things from the zones next door that lean over the border: their shadows (and rocks/peaks) belong here too
-        nb = []
-        for y in range(-1, CS + 3):
-            for x in range(-2, CS + 2):
-                if 0 <= x < CS and 0 <= y < CS:
-                    continue
-                gx, gy = cx * CS + x, cy * CS + y
-                if not self.inside(gx // CS, gy // CS):
-                    continue
-                hit = weird.pick_big(self.species, self.cell(gx, gy), proto.rnd_cells(np.array(gx), np.array(gy), self.seed + 99))
-                if hit:
-                    nb.append((hit[0], x, y, hit[1], hit[2], hit[3], True))
-        # (everything below only touches this zone's own image)
-        def jit(kind, x, y):                     # nudge natural things off the grid a little, up and down too
-            if kind.startswith("p_") or kind == "hut":
-                return 0
-            return int(weird._h(np.array(cx * CS + x), np.array(cy * CS + y), 4411) * 15) - 7
-        bigs = sorted([it for it in items + nb if it[6]], key=lambda it: (it[2], it[1]))
-        for (kind, x, y, spr, m, dx, _) in bigs:                 # every shadow first...
-            p.big_shadow(x, y, spr, dx, jit(kind, x, y))
-        for (kind, x, y, spr, m, dx, big) in sorted(items, key=lambda it: (it[2], it[1])):
-            if not big and kind not in weird.SWAY and kind != "fire":       # small props from structures
-                p.shadow(x, y, spr, dx)
-                p.sprite(x, y, spr, m, dx=dx)
-        for (kind, x, y, spr, m, dx, _) in bigs:                 # ...then the things that don't move
-            if kind not in weird.SWAY:
-                p.big_body(x, y, spr, m, dx, jit(kind, x, y))
-        feats = []
-        for (kind, x, y, spr, m, dx, big) in sorted(items, key=lambda it: (it[2], it[1])):
-            gx, gy = cx * CS + x, cy * CS + y
-            if kind == "fire":
-                feats.append(("fire", gx * weird.TS, gy * weird.TS, None))
-                fires.add((gx, gy))
-            elif kind in weird.SWAY:
-                key = (id(spr), tuple(sorted(m.items())))
-                fsprites[key] = (spr, m, kind)
-                n = spr.shape[0]
-                j_ = jit(kind, x, y)
-                if big:
-                    feats.append((kind, gx * weird.TS + weird.TS // 2 - n // 2 + dx, (gy + 1) * weird.TS - n + j_, key))
-                else:
-                    feats.append((kind, gx * weird.TS + dx, gy * weird.TS + j_ // 2, key))
-        return p.img, feats, fires, fsprites
+        own = type(self).lines is World.lines and getattr(self, "pool", None) is not None
+        roads, trails = (None, None) if own else self.lines(cx, cy)    # (None: the worker traces them itself)
+        return (self.seed, cx, cy, B, self.density(cx, cy), roads, trails, proto.W, proto.H)
+
+    def build(self, cx, cy, here=False):
+        """draw a zone into a palette-index image: in a worker process if there are any (no stutter), else here.
+        here=True: the game is waiting for it right now, so don't queue behind the workers"""
+        args = self.build_inputs(cx, cy)
+        pool = None if here else getattr(self, "pool", None)
+        if args[5] is None and pool is None:
+            args = args[:5] + self.lines(cx, cy) + args[7:]
+        if pool is not None:
+            try:
+                return pool.submit(zonepaint.paint_zone, *args).result()
+            except Exception:
+                self.pool = None                         # workers broke: carry on drawing here
+        return zonepaint.paint_zone(*args, species=self.species)
 
     def world_map(self):
         """the whole world as a picture: drawn once (in the background, at start), then kept in the world's folder"""
@@ -1035,20 +1018,24 @@ class Game:
     def update_view(self):
         """what you can see from here, at this time of day"""
         day, phase, r, tint = self.clock()
-        r = min(r, im.THICK.get(self.here, 99))
+        SW, SH = self.screen.get_size()                  # Qud-style: you see the whole screen (user), no line of sight
+        z = self.ZOOMS[getattr(self, "zoom", 2)]
+        hw, hh = int(SW / z / PX / 2) + 2, int((SH - HUD_H - LOG_H) / z / PX / 2) + 2
+        r = max(hw, hh)
         self.radius = r
-        vkey = (self.px, self.py, r, tint)
+        vkey = (self.px, self.py, hw, hh, tint)
         seeing_through_head = self.head_out is not None and self.head_out["kind"] in ("boomerang", "scout")
         if vkey != getattr(self, "_vkey", None) and not seeing_through_head:           # only look again if you moved or the light changed
             self._vkey = vkey
-            self.vis = im.fov(self.px, self.py, r, self.w.cell)   # all round you, as far as you can see
-            self.w.remember(self.vis)
+            self.vis = {(x, y) for x in range(self.px - hw, self.px + hw + 1) for y in range(self.py - hh, self.py + hh + 1)}
+            self.w.remember_rect(self.px - hw, self.py - hh, self.px + hw + 1, self.py + hh + 1)
             self.dark = None
         self.amb.area(self.zone_mood(), phase == "Night")
         zx, zy = self.px // CS, self.py // CS                # get the zones round you ready before you get there
         lx, ly = self.px % CS, self.py % CS
         near = [(zx + dx, zy + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
         near.sort(key=lambda q: abs((q[0] - zx) * CS + CS / 2 - lx - CS / 2 * 0) + abs((q[1] - zy) * CS - ly + CS / 2))
+        self.w.focus = ((self.fx + 0.5 + self.vx * 1.5) / CS, (self.fy + 0.5 + self.vy * 1.5) / CS)  # where you'll be
         self.w.prefetch(near)
         zk = (self.px // CS, self.py // CS)
         if zk != getattr(self, "_zone", None):          # new zone: name the land if it's changed, then anything found
@@ -2415,8 +2402,10 @@ class Game:
                      pygame.K_h: (-1, 0), pygame.K_l: (1, 0), pygame.K_k: (0, -1), pygame.K_j: (0, 1),
                      pygame.K_KP4: (-1, 0), pygame.K_KP6: (1, 0), pygame.K_KP8: (0, -1), pygame.K_KP2: (0, 1),
                      pygame.K_KP7: (-1, -1), pygame.K_KP9: (1, -1), pygame.K_KP1: (-1, 1), pygame.K_KP3: (1, 1)}
-            if k in moves and self.show_map:
-                self.travel(*moves[k])
+            if k in moves and self.show_map:          # the map only looks: a cursor moves, you don't
+                mx, my = getattr(self, "map_cur", None) or (self.px // CS, self.py // CS)
+                dx, dy = moves[k]
+                self.map_cur = (max(0, min(proto.W - 1, mx + dx)), max(0, min(proto.H - 1, my + dy)))
             elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and self.show_map:
                 self.show_map = False
             elif k in moves:
@@ -2451,6 +2440,7 @@ class Game:
                 self.say("Sound on." if self.amb.toggle() else "Sound off.")
             elif k == pygame.K_m:
                 self.show_map = not self.show_map
+                self.map_cur = None
                 if self.show_map:
                     self.draw_text_center("Drawing the map…")
             elif k in (pygame.K_PERIOD, pygame.K_KP5):
@@ -3067,7 +3057,7 @@ class Game:
         i, j = i[on], j[on]
         d2 = ((vx[on] - self.px) ** 2 + (vy[on] - self.py) ** 2) / (r * r)
         a[j, i, 0], a[j, i, 1], a[j, i, 2] = tint[0], tint[1], tint[2]
-        alpha = np.minimum(235, tint[3] + d2 * 120)
+        alpha = np.full(d2.shape, min(tint[3], 120), np.float64)    # one even tint over the whole screen (user)
         if self.clock()[1] in ("Dusk", "Night"):                    # your little light pushes the dark back
             near = np.sqrt((vx[on] - self.px) ** 2 + (vy[on] - self.py) ** 2)
             alpha = alpha * (1 - 0.8 * np.clip(1 - near / 3.2, 0, 1))
@@ -3114,11 +3104,21 @@ class Game:
         pygame.draw.circle(self.screen, (255, 90, 70), (int(x), int(y)), 3)
         x0, y0 = ox + (self.px // CS) * tw, oy + (self.py // CS) * th
         pygame.draw.rect(self.screen, (255, 255, 255), (int(x0) - 1, int(y0) - 1, int(tw) + 3, int(th) + 3), 1)
+        cur = getattr(self, "map_cur", None)
+        if cur:                                                  # the look cursor
+            x1, y1 = ox + cur[0] * tw, oy + cur[1] * th
+            pygame.draw.rect(self.screen, (255, 210, 90), (int(x1) - 2, int(y1) - 2, int(tw) + 5, int(th) + 5), 2)
+            b = str(self.w.wd.biome[cur[1], cur[0]])
+            seen = cur in self.w.visited
+            what = (NAMES.get(b, b) + (", a town" if cur in self.w.wd.towns else "")) if seen else "Unexplored"
+            d = max(abs(cur[0] - self.px // CS), abs(cur[1] - self.py // CS))
+            self.screen.blit(self.font.render(f"Looking at: {what}  ({d} squares away)", True, (255, 220, 130)),
+                             (ox + 200, HUD_H + 14))
         here = str(self.w.wd.biome[self.py // CS, self.px // CS])
         info = f"You are in: {NAMES.get(here, here)}     Explored {len(self.w.visited)} squares     Towns visited " \
                f"{sum(1 for t in self.w.wd.towns if t in self.w.visited)} / {len(self.w.wd.towns)}"
         self.screen.blit(self.font.render(info, True, (210, 205, 195)), (ox, oy + mh + 8))
-        hint = self.small.render("Arrows: travel one square (takes time)    M / Enter / Esc: back    "
+        hint = self.small.render("Arrows: look around    M / Enter / Esc: back    "
                                  "Clear = explored, dark = not yet    house = town", True, (150, 145, 140))
         self.screen.blit(hint, (ox, oy + mh + 30))
 
@@ -3425,6 +3425,7 @@ def main():
         g.frame()
         pygame.image.save(screen, args[args.index("--shot") + 1])
         g.save()
+        g.w.close()
         print("at", g.px, g.py, g.here, "| hp", g.hp, "lvl", g.lvl, "xp", g.xp, "| mobs loaded", len(g.w.mobs), "|", " / ".join(g.msgs))
         return
     if getattr(g, "new_story", False):
@@ -3446,6 +3447,7 @@ def main():
     p = getattr(g.w, "_map_proc", None)
     if p and p.poll() is None:
         p.terminate()                                    # an unfinished world map is just redrawn next time
+    g.w.close()
     pygame.quit()
 
 
