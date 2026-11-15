@@ -2,7 +2,10 @@
 """Weird-style previews: out/w_tiles.png, out/w_world.png, out/w_zone_*.png, out/w_cycle.gif"""
 import math, os, sys
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+try:                                   # (only the preview pictures need it; the game and the phone app don't)
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    Image = ImageDraw = ImageFont = None
 import proto, weird
 from weird import F, TS as T, Painter8, Species
 

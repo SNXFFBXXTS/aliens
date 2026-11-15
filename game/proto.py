@@ -10,7 +10,10 @@ permanent later: same seed + same coordinates = same place.
 """
 import heapq, math, os, sys
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+try:                                   # (only the preview pictures need it; the game and the phone app don't)
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    Image = ImageDraw = ImageFont = None
 from art import P, B, S, T, Painter, dark, mix
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
