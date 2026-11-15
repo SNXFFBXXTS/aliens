@@ -3560,6 +3560,8 @@ def main():
         return
     if getattr(g, "new_story", False):
         g.cold_open = time.monotonic()
+    import signal                                        # rl-stop (or a shutdown) closes the game properly and saves
+    signal.signal(signal.SIGTERM, lambda *_: pygame.event.post(pygame.event.Event(pygame.QUIT)))
     clock = pygame.time.Clock()
     running = True
     while running:
