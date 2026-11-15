@@ -32,6 +32,7 @@ import structures                                      # noqa: E402
 import buildings                                       # noqa: E402
 import items                                           # noqa: E402
 import heads                                           # noqa: E402
+import phone                                           # noqa: E402
 from weird_proto import world8                         # noqa: E402
 from art import P, B, T, Painter                       # noqa: E402
 
@@ -40,6 +41,11 @@ CS = proto.ZS                                          # cells per chunk
 PX = T * SCALE                                         # pixels per cell on screen
 ROOT = os.environ.get("RL_HOME") or os.path.expanduser("~/.local/share/roguelike")
 HUD_H, LOG_H = 30, 80
+PHONE = phone.ON                                       # upright, touch controls (Android, or rl --phone)
+if PHONE:
+    HUD_H, LOG_H = phone.HUD_H, phone.LOG_H
+if phone.ANDROID:
+    os.environ.setdefault("RL_NOPROC", "1")            # no worker processes on a phone: zones are painted in the game
 ACTIVE = 28                                            # creatures further away than this sleep
 SPEED = 5.0          # walking speed, cells a second
 ACCEL = 14.0         # how quickly you get up to speed
@@ -475,6 +481,11 @@ class World:
         """begin drawing the world map in a separate process (so the game doesn't stutter) so M opens straight away"""
         if os.path.exists(os.path.join(self.dir, "worldmap.png")) or getattr(self, "_map_proc", None):
             return
+        if phone.ANDROID:                                  # (no second Python on a phone: a thread instead)
+            t = threading.Thread(target=_draw_world_map, args=(self.seed, self.dir), daemon=True)
+            t.start()
+            self._map_proc = type("T", (), {"poll": lambda _s: None if t.is_alive() else 0, "terminate": lambda _s: None})()
+            return
         import subprocess
         code = (f"import sys; sys.path.insert(0, {os.path.dirname(os.path.abspath(__file__))!r}); "
                 f"import rl; rl._draw_world_map({self.seed}, {self.dir!r})")
@@ -552,6 +563,10 @@ class Game:
             self.say(who + ("come" if not self.char else "comes") + " down near a settlement. Smoke, but no voices. "
                      "(M world map, E search, I bag)")
         self.wear()
+        self.phone = phone.Controls(self) if PHONE else None
+        if PHONE:
+            self.MINI_PX = 2                               # a smaller minimap on a narrow screen
+            self.zoom = 1
         if not getattr(self.w, "showcase", False):
             self.w.start_world_map()
         self.here = self.w.cell(self.px, self.py)
@@ -565,7 +580,8 @@ class Game:
 
     # ── setup ──
     def load_font(self, sz, bold=False):
-        f = "/usr/share/fonts/noto/NotoSans-%s.ttf" % ("Bold" if bold else "Regular")
+        import fonts
+        f = fonts.find(fonts.UIB if bold else fonts.UI)
         return pygame.font.Font(f if os.path.exists(f) else None, sz)
 
     def load_character(self):
@@ -1049,7 +1065,7 @@ class Game:
         r = max(hw, hh)
         self.radius = r
         vkey = (self.px, self.py, hw, hh, tint)
-        seeing_through_head = self.head_out is not None and self.head_out["kind"] in ("boomerang", "scout")
+        seeing_through_head = self.head_out is not None and self.head_out["kind"] == "boomerang"
         if vkey != getattr(self, "_vkey", None) and not seeing_through_head:           # only look again if you moved or the light changed
             self._vkey = vkey
             self.vis = {(x, y) for x in range(self.px - hw, self.px + hw + 1) for y in range(self.py - hh, self.py + hh + 1)}
@@ -1160,6 +1176,8 @@ class Game:
     def update(self, dt):
         """real time: glide about, bump into things, and let the world take its turns"""
         self.sync()
+        if self.phone:
+            self.phone.tick(dt)
         if getattr(self, "cold_open", None):
             return
         if self.dead or self.show_map or self.show_inv or self.loot or getattr(self, "build_menu", False) or \
@@ -1183,15 +1201,20 @@ class Game:
                 ix += dx
                 iy += dy
         ix, iy = max(-1, min(1, ix)), max(-1, min(1, iy))
+        push = 1.0
+        stick = self.phone.direction() if self.phone else None
+        if stick:
+            ix, iy, push = stick                               # the touch joystick: any angle, gentle or hard
         if ix or iy:
             n = math.hypot(ix, iy)
-            spd = SPEED * (0.55 if items.weight(self.inv) > self.cap else 1.0) * getattr(self, "speed_mul", 1.0)
+            spd = SPEED * (0.55 if items.weight(self.inv) > self.cap else 1.0) * getattr(self, "speed_mul", 1.0) * push
             tx, ty = ix / n * spd, iy / n * spd
             a = min(1.0, dt * ACCEL)
             self.vx += (tx - self.vx) * a
             self.vy += (ty - self.vy) * a
-            if (ix, iy) != getattr(self, "facing", None):
-                self.facing = (ix, iy)
+            face = (int(round(ix / n)), int(round(iy / n)))      # facing is one of the 8 directions
+            if face != getattr(self, "facing", None):
+                self.facing = face
                 self.dark = None
         else:                                          # let go: skate to a stop
             f = math.exp(-dt * FRICTION)
@@ -1487,10 +1510,10 @@ class Game:
 
     # ── your head (anime-strength) ──
     IMPACT = {"boomerang": "斬", "fire": "爆", "frost": "凍", "storm": "轟", "rot": "腐", "shield": "護", "spin": "旋",
-              "nova": "叫", "scout": "視"}
+              "nova": "叫", "scout": "光"}
     INK = {"boomerang": (240, 220, 190), "fire": (255, 140, 50), "frost": (170, 225, 255), "storm": (255, 250, 150),
            "rot": (150, 210, 80), "shield": (230, 220, 200), "spin": (220, 200, 170), "nova": (255, 255, 255),
-           "scout": (255, 70, 60)}
+           "scout": (255, 40, 40)}
 
     def head_pos(self):
         """where your head sits on you, in cells"""
@@ -1559,14 +1582,46 @@ class Game:
                      "You swing your head out on its chain.")
         elif pw == "nova":
             self.head_out = dict(kind="scream", x=hx, y=hy, t=0.0, fired=False, dmg=dmg + 9)
-        elif pw == "scout":
-            tx, ty = (target if target else (hx + dx * 9, hy + dy * 9))
-            d_ = math.hypot(tx - hx, ty - hy)
-            if d_ > 12:
-                tx, ty = hx + (tx - hx) / d_ * 12, hy + (ty - hy) / d_ * 12
-            self.head_out = dict(kind=pw, x=hx, y=hy, tx=tx, ty=ty, t=0.0, dur=P["time"], back=False, beam=0.0,
-                                 dmg=dmg)
-            self.say("Your head drifts off to look. Whatever it sees, it burns.")
+        elif pw == "scout":                                     # "Red eye": lasers, every which way
+            self.head_out = dict(kind="laser", x=hx, y=hy, t=0.0, dur=P["time"], next=0.12, aim=(dx, dy))
+            self.say("Your head lifts off. Its eyes open, red.")
+            self.amb.fx("equip", 0.6)
+
+    def fire_laser(self, h, reach=11.0):
+        """one red laser from the head: at something nearby, or just anywhere. Kills whatever it touches; walls stop it"""
+        x0, y0 = h["x"], h["y"]
+        near = [m for m in list(self.w.mobs.values()) if m.id not in self.tame and
+                math.hypot(m.x + 0.5 - x0, m.y + 0.5 - y0) < reach - 1]
+        if near and random.random() < 0.6:
+            m = random.choice(near)
+            ang = math.atan2(m.y + 0.5 - y0, m.x + 0.5 - x0) + random.uniform(-0.05, 0.05)
+        elif random.random() < 0.4:                             # roughly where you're facing
+            ang = math.atan2(h["aim"][1], h["aim"][0]) + random.uniform(-0.8, 0.8)
+        else:
+            ang = random.uniform(0, 2 * math.pi)
+        dx, dy = math.cos(ang), math.sin(ang)
+        d, step = 0.0, 0.25
+        while d < reach:                                         # walk the beam out until a wall
+            d += step
+            c = (int(math.floor(x0 + dx * d)), int(math.floor(y0 + dy * d)))
+            if self.blocked(*c) and not self.w.mob_at(*c) and self.w.cell(*c) not in ("bonfire",):
+                break
+        x1, y1 = x0 + dx * d, y0 + dy * d
+        killed = 0
+        for m in list(self.w.mobs.values()):                     # everything the beam touches
+            if m.id in self.tame:
+                continue
+            mx, my = m.x + 0.5 - x0, m.y + 0.5 - y0
+            along = mx * dx + my * dy
+            if 0 < along <= d and abs(mx * dy - my * dx) < 0.6:
+                self.damage_mob(m, max(1, m.hp), "burn through", power="scout")   # exactly enough: one touch kills
+                killed += 1
+        self.zaps.append(dict(a=(x0, y0), b=(x1, y1), t=time.monotonic(), col=self.INK["scout"], straight=True, laser=True))
+        self.burst(x1, y1, (255, 60, 50), 6, 4, 2, life=0.25)
+        if killed:
+            self.juice(shake=5, stop=0.02)
+        else:
+            self.juice(shake=1.5)
 
     def scream(self, hx, hy, dmg):
         for k in range(3):
@@ -1731,33 +1786,19 @@ class Game:
                 if h["t"] >= h["dur"]:
                     self.head_out = None
                     self.say("Your head settles back on your shoulders.")
-            elif k == "scout":
+            elif k == "laser":                                # Red eye: hovers over you, fires lasers in bursts
                 h["t"] += dt
-                tx, ty = (px_, py_) if h["back"] or h["t"] > h["dur"] else (h["tx"], h["ty"])
-                dx, dy = tx - h["x"], ty - h["y"]
-                d = math.hypot(dx, dy)
                 if h["t"] > h["dur"]:
-                    h["back"] = True
-                if h["back"] and d < 0.6:
                     self.head_out = None
-                    self.say("Your head comes home. It's seen things.")
-                    self._vkey = None
-                    self.update_view()
+                    self.say("The red goes out of its eyes. Your head settles back on.")
                     return
-                if d > 0.05:
-                    h["x"] += dx / d * min(11 * dt, d)
-                    h["y"] += dy / d * min(11 * dt, d)
-                h["beam"] -= dt                               # whatever it sees, it burns
-                if h["beam"] <= 0 and not h["back"]:
-                    near = sorted((m for m in list(self.w.mobs.values()) if math.hypot(m.x + 0.5 - h["x"], m.y + 0.5 - h["y"]) < 7.5),
-                                  key=lambda m: math.hypot(m.x - h["x"], m.y - h["y"]))[:3]
-                    for m in near:
-                        self.zaps.append(dict(a=(h["x"], h["y"]), b=(m.x + 0.5, m.y + 0.5), t=now, col=self.INK["scout"], straight=True))
-                        self.damage_mob(m, h["dmg"], "burn", power="scout")
-                    if near:
-                        self.juice(shake=4, stop=0.03)
-                        h["beam"] = 0.6
-            if self.head_out and k in ("boomerang", "scout"):    # you see from your head, not your eyes
+                h["x"] = px_ + 0.08 * math.sin(h["t"] * 31)
+                h["y"] = py_ - 0.9 + 0.08 * math.cos(h["t"] * 23)
+                if h["t"] >= h["next"]:
+                    h["next"] = h["t"] + random.choice((0.04, 0.07, 0.1, 0.18, 0.3, 0.45))   # sporadic
+                    for _ in range(random.choice((1, 1, 2, 3))):
+                        self.fire_laser(h)
+            if self.head_out and k == "boomerang":            # you see from your head, not your eyes
                 cell = (int(math.floor(self.head_out["x"])), int(math.floor(self.head_out["y"])))
                 if cell != getattr(self, "_headcell", None):
                     self._headcell = cell
@@ -1840,9 +1881,11 @@ class Game:
                 pX, pY = to(*self.head_pos())
                 X, Y = to(h["x"], h["y"])
                 pygame.draw.line(S, (150, 150, 160), (pX, pY + 6), (X, Y), 3)
-            if h["kind"] == "scout":
+            if h["kind"] == "laser":                           # a red glow round the head
                 X, Y = to(h["x"], h["y"])
-                pygame.draw.circle(S, (120, 40, 40), (X, Y), int(PX * 7.5), 1)
+                g = pygame.Surface((PX * 3, PX * 3), pygame.SRCALPHA)
+                pygame.draw.circle(g, (255, 30, 30, 70 + int(40 * math.sin(now * 40))), (PX * 3 // 2, PX * 3 // 2), PX)
+                S.blit(g, (X - PX * 3 // 2, Y - PX * 3 // 2))
             for (hx_, hy_, a_) in (h.get("heads") or [(h["x"], h["y"], math.radians(h.get("spin", 0)))]):
                 X, Y = to(hx_, hy_)
                 charcreate.draw_head(S, X, Y, hsz + 6, self.headinfo["glyph"], skin, -math.degrees(a_) if h["kind"] in ("shield", "spin") else -h.get("spin", 0))
@@ -1864,7 +1907,11 @@ class Game:
         for zp in self.zaps:
             a, b = to(*zp["a"]), to(*zp["b"])
             col = zp.get("col", heads.POWERS["storm"]["col"])
-            if zp.get("straight"):
+            if zp.get("laser"):                               # red laser: wide glow, hot core
+                pygame.draw.line(S, (150, 10, 10), a, b, 9)
+                pygame.draw.line(S, col, a, b, 5)
+                pygame.draw.line(S, (255, 210, 200), a, b, 2)
+            elif zp.get("straight"):
                 pygame.draw.line(S, col, a, b, 4)
                 pygame.draw.line(S, (255, 230, 220), a, b, 1)
             else:
@@ -2000,11 +2047,7 @@ class Game:
         self.say("You pull it apart and keep what's worth keeping.")
 
     def draw_build_menu(self):
-        import dosui
-        if not hasattr(self, "dos"):
-            self.dos = dosui.Dos()
-        D = self.dos
-        D.clear()
+        D = self.dos_screen()
         D.put(1, 0, "Build", "white")
         D.put(1, 1, "What do you want to build?", "yellow")
         y = 3
@@ -2013,19 +2056,22 @@ class Game:
             L = self.LETTERS[i]
             D.put(2, y, f"{L} - ", "white" if ok else "dgrey")
             D.put(6, y, name, "white" if ok else "dgrey")
-            cx = 26
+            cx = 26 if not PHONE else 23
             for k, n in cost.items():
                 have = self.inv.get(k, 0)
                 g, col = items.GLYPH[k]
                 D.put(cx, y, g, col if have >= n else "dgrey")
                 txt = f" {n} {items.ITEMS[k][0].split(' of ')[-1]} ({have})"
                 D.put(cx + 1, y, txt, "grey" if have >= n else "red")
-                cx += len(txt) + 3
+                cx += len(txt) + (3 if not PHONE else 1)
+            if len(what) > D.cols - 7:                          # (cut at a word on a narrow screen)
+                what = what[:what.rfind(" ", 0, D.cols - 8)] + "…"
             D.put(6, y + 1, what, "dgrey")
             y += 2
-        D.put(0, 23, "─" * 80, "dgrey")
-        D.put(1, 24, "[a-k] choose, then place it: [Enter]/[E]/click builds  [X] takes yours down  [Q] done", "grey")
-        self._dos_place = D.blit_to(self.screen)
+        self._tap_rows = {3 + 2 * i + j: self.LETTERS[i] for i in range(len(items.BUILD)) for j in (0, 1)}
+        self.dos_foot(D, "Tap one, then tap where it goes: [Build] builds  [Take down] takes yours down  [Back] done"
+                      if PHONE else "[a-k] choose, then place it: [Enter]/[E]/click builds  [X] takes yours down  [Q] done")
+        self._dos_place = self.dos_blit(D)
 
     def draw_build_ghost(self, S, top, cxp, cyp):
         """where the thing you're placing would go: green if you can, red if you can't"""
@@ -2319,7 +2365,8 @@ class Game:
             charcreate.draw_char(fig, fig.get_width() // 2, fig.get_height() // 2, int(sh * 0.42), self.char["body"],
                                  look, tuple(self.char["skin_rgb"]), None, clothes=(self.jacket, self.trousers))
             card.blit(fig, (int(sw * 0.62) - fig.get_width() // 2, int(sh * 0.52) - fig.get_height() // 2))
-            serif = "/usr/share/fonts/noto/NotoSerif-BoldItalic.ttf"
+            import fonts
+            serif = fonts.find(fonts.SERIF)
             try:
                 f_small, f_big = pygame.font.Font(serif, 26), pygame.font.Font(serif, 64)
             except OSError:
@@ -2368,6 +2415,8 @@ class Game:
             self.screen.blit(fade, (0, 0))
 
     def handle(self, e):
+        if self.phone and self.phone.handle(e):           # touch controls first (they press the keys below)
+            return True
         if getattr(self, "cold_open", None):
             if e.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN) and time.monotonic() - self.cold_open > 0.4:
                 self.cold_open, self._card = None, None
@@ -3156,6 +3205,15 @@ class Game:
         here = str(self.w.wd.biome[self.py // CS, self.px // CS])
         info = f"You are in: {NAMES.get(here, here)}     Explored {len(self.w.visited)} squares     Towns visited " \
                f"{sum(1 for t in self.w.wd.towns if t in self.w.visited)} / {len(self.w.wd.towns)}"
+        if PHONE:                                             # one thing per line on a narrow screen
+            towns = f"{sum(1 for t in self.w.wd.towns if t in self.w.visited)} / {len(self.w.wd.towns)}"
+            for j, (t, f, col) in enumerate([(f"You are in: {NAMES.get(here, here)}", self.font, (210, 205, 195)),
+                                             (f"Explored {len(self.w.visited)} squares", self.font, (210, 205, 195)),
+                                             (f"Towns visited {towns}", self.font, (210, 205, 195)),
+                                             ("Joystick: look around    Back: close", self.small, (150, 145, 140)),
+                                             ("Clear = explored, dark = not yet, house = town", self.small, (150, 145, 140))]):
+                self.screen.blit(f.render(t, True, col), (ox, oy + mh + 8 + j * 22))
+            return
         self.screen.blit(self.font.render(info, True, (210, 205, 195)), (ox, oy + mh + 8))
         hint = self.small.render("Arrows: look around    M / Q / Esc: back    "
                                  "Clear = explored, dark = not yet    house = town", True, (150, 145, 140))
@@ -3243,10 +3301,72 @@ class Game:
         pygame.draw.circle(self.screen, (255, 255, 255), (int(c[0]), int(c[1])), 3)
         fx_, fy_ = getattr(self, "facing", (0, 1))
         pygame.draw.line(self.screen, (255, 230, 150), (int(c[0]), int(c[1])), (int(c[0] + fx_ * 7), int(c[1] + fy_ * 7)), 2)
-        lab = self.small.render("V hide   M world map", True, (150, 145, 140))
-        self.screen.blit(lab, (r.x, r.bottom + 6))
+        if not PHONE:
+            lab = self.small.render("V hide   M world map", True, (150, 145, 140))
+            self.screen.blit(lab, (r.x, r.bottom + 6))
+
+    def wrap_text(self, font, text, w):
+        words, lines, cur = text.split(), [], ""
+        for wd in words:
+            t = (cur + " " + wd).strip()
+            if font.size(t)[0] > w and cur:
+                lines.append(cur)
+                cur = wd
+            else:
+                cur = t
+        return lines + ([cur] if cur else [])
+
+    def draw_hud_phone(self):
+        """the upright phone layout: two rows of bars on top, messages, then the touch controls"""
+        S = self.screen
+        sw, sh = S.get_size()
+        pygame.draw.rect(S, (14, 12, 18), (0, 0, sw, HUD_H))
+        name = NAMES.get(self.here, self.here)
+        S.blit(self.font.render(name, True, (240, 220, 160)), (8, 4))
+        day, phase, _, _ = self.clock()
+        info = self.small.render(f"Lv {self.lvl}  XP {self.xp}/{self.lvl * 25}  Day {day}, {phase}  "
+                                 + "*" * (1 + self.w.tier(self.px // CS, self.py // CS)), True, (170, 170, 185))
+        S.blit(info, (sw - info.get_width() - 8, 6))
+        w = (sw - 16 - 12) // 3
+        for i, (lab, v, top_, col, bgc) in enumerate((
+                (f"HP {self.hp}/{self.maxhp}", self.hp, self.maxhp, (220, 50, 60), (60, 10, 14)),
+                (f"Food {int(self.food)}", self.food, 100, (220, 150, 60), (60, 36, 12)),
+                (f"Water {int(self.water)}", self.water, 100, (80, 150, 230), (14, 34, 60)))):
+            x = 8 + i * (w + 6)
+            low = top_ and v / top_ <= 0.2 and int(time.monotonic() * 3) % 2
+            pygame.draw.rect(S, bgc, (x, 30, w, 18), border_radius=3)
+            pygame.draw.rect(S, (255, 255, 255) if low else col, (x, 30, int(w * max(0, v) / top_), 18), border_radius=3)
+            S.blit(self.small.render(lab, True, (255, 255, 255)), (x + 5, 32))
+        ly = sh - LOG_H                                       # messages: the newest ones, wrapped
+        pygame.draw.rect(S, (14, 12, 18), (0, ly, sw, LOG_H - phone.PANEL_H))
+        lines = []
+        for n, msg in enumerate(self.msgs):
+            col = (225, 225, 225) if n == len(self.msgs) - 1 else (125, 125, 135)
+            lines += [(t, col) for t in self.wrap_text(self.small, msg, sw - 16)]
+        for j, (t, col) in enumerate(lines[-5:]):
+            S.blit(self.small.render(t, True, col), (8, ly + 3 + j * 14))
+        menus = self.show_inv or self.loot or getattr(self, "build_menu", False) or getattr(self, "outfit", False)
+        if getattr(self, "show_mini", True) and not self.show_map and not menus:
+            self.draw_minimap()
+        if not self.show_map and not menus:
+            col, txt = self.threat()
+            img = self.small.render(txt, True, col)
+            bg = pygame.Surface((img.get_width() + 26, 22), pygame.SRCALPHA)
+            bg.fill((8, 6, 10, 190))
+            S.blit(bg, (6, HUD_H + 6))
+            pygame.draw.circle(S, col, (16, HUD_H + 17), 4)
+            S.blit(img, (26, HUD_H + 10))
+        if self.show_inv or self.loot:
+            self.draw_menu()
+        if getattr(self, "build_menu", False):
+            self.draw_build_menu()
+        if getattr(self, "outfit", False):
+            self.draw_outfit()
+        self.phone.draw()
 
     def draw_hud(self):
+        if PHONE:
+            return self.draw_hud_phone()
         sw, sh = self.screen.get_size()
         pygame.draw.rect(self.screen, (14, 12, 18), (0, 0, sw, HUD_H))
         pygame.draw.rect(self.screen, (14, 12, 18), (0, sh - LOG_H, sw, LOG_H))
@@ -3343,17 +3463,14 @@ class Game:
 
     def draw_outfit(self):
         """C: change jacket, trousers and weapon. A DOS screen like the bag, with you drawn on the right"""
-        import dosui, charcreate
-        if not hasattr(self, "dos"):
-            self.dos = dosui.Dos()
-        D = self.dos
-        D.clear()
+        import charcreate
+        D = self.dos_screen()
         D.put(1, 0, "Outfit", "white")
         D.put(1, 1, "What do you want to wear and carry?", "yellow")
         arm, spd, car = charcreate.outfit_bonus(self.jacket, self.trousers)
         txt = f"Armour {arm}  Speed {spd:+d}%  Carry {self.cap:.0f} kg"
-        D.put(79 - len(txt), 0, txt, "cyan")
-        y, last = 3, None
+        D.put(D.cols - 1 - len(txt), 0 if not PHONE else 2, txt, "cyan")
+        y, last = 3 if not PHONE else 4, None
         for L, kind, v in self.outfit_rows():
             if kind != last:
                 if last:
@@ -3361,8 +3478,9 @@ class Game:
                 D.put(1, y, {"jacket": "Jackets", "trousers": "Trousers", "weapon": "Weapons (from your bag)"}[kind], "lblue")
                 y += 1
                 last = kind
-            if y > 22:
+            if y > D.rows - 4:
                 break
+            self._tap_rows[y] = L
             on = v == {"jacket": self.jacket, "trousers": self.trousers, "weapon": self.weapon}[kind]
             col = "white" if on else "grey"
             D.put(2, y, f"{L} {'+' if on else '-'} ", col)
@@ -3384,27 +3502,56 @@ class Game:
                     D.put(8, y, lst[v]["name"], col)
                     D.put(28, y, charcreate.bonus_text(lst[v]), "dgrey")
             y += 1
-        D.put(0, 23, "─" * 80, "dgrey")
-        D.put(1, 24, "[letter] wear or hold it   [Q] done   (find old weapons in shrines and racks)", "grey")
-        self._dos_place = D.blit_to(self.screen)
-        # you, in it, on the right
+        self.dos_foot(D, ("Tap to wear or hold it" if PHONE else "[letter] wear or hold it   [Q] done") +
+                      "   (find old weapons in shrines and racks)")
+        self._dos_place = self.dos_blit(D)
+        # you, in it, on the right (on a phone: underneath)
         sw, sh = self.screen.get_size()
-        size = int(sh * 0.3)
+        size = int(sh * 0.3) if not PHONE else 120
+        if PHONE:
+            ox, oy, k_ = self._dos_place
+            bottom = oy + int((y + 1) * 16 * k_)
+            room = sh - phone.PANEL_H - bottom - 60
+            if room < 100:
+                return
+            size = min(size, room // 2)
         fig = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
         gear = list(self.char.get("look", [None] * 4))[:4]
         gear[1] = self.weapon if self.weapon in charcreate.WEAPONS else (None if self.weapon is None else "crowbar")
         look = tuple(gear) + (tuple(self.char["coat"]), tuple(self.char["trim"]))
         charcreate.draw_char(fig, size, size, size, self.char["body"], look, tuple(self.char["skin_rgb"]), None,
                              head=self.headinfo["glyph"], clothes=(self.jacket, self.trousers))
-        self.screen.blit(fig, (int(sw * 0.74) - size, int(sh * 0.5) - size))
+        self.screen.blit(fig, ((int(sw * 0.74) - size, int(sh * 0.5) - size) if not PHONE else
+                               (sw // 2 - size, bottom + 10)))
+
+    def dos_screen(self):
+        """the DOS text screen the menus are written on: 80 x 25, or tall and narrow above the phone controls"""
+        import dosui
+        if not hasattr(self, "dos"):
+            self.dos = dosui.Dos(56, 46) if PHONE else dosui.Dos()
+        self.dos.clear()
+        self._tap_rows = {}                                     # (phone) text row -> the key a tap there presses
+        return self.dos
+
+    def dos_blit(self, D):
+        sw, sh = self.screen.get_size()
+        return D.blit_to(self.screen, (0, 0, sw, sh - phone.PANEL_H) if PHONE else None)
+
+    def dos_foot(self, D, text, col="grey"):
+        """the key help along the bottom (wrapped onto two lines when the screen is narrow)"""
+        W, H = D.cols, D.rows
+        D.put(0, H - 3 if PHONE else H - 2, "─" * W, "dgrey")
+        if len(text) <= W - 2:
+            D.put(1, H - 1, text, col)
+            return
+        cut = text.rfind("  ", 0, W - 2)
+        cut = cut if cut > 0 else W - 2
+        D.put(1, H - 2, text[:cut].strip(), col)
+        D.put(1, H - 1, text[cut:].strip(), col)
 
     def draw_menu(self):
         """the inventory / pick-up menus: a full DOS text screen, Dungeon Crawl Stone Soup-style"""
-        import dosui
-        if not hasattr(self, "dos"):
-            self.dos = dosui.Dos()
-        D = self.dos
-        D.clear()
+        D = self.dos_screen()
         inv = self.menu_inv()
         kg_bag = items.weight(self.inv)
         if self.loot:
@@ -3412,17 +3559,19 @@ class Game:
             if self.mode == "take":
                 D.put(1, 0, f"{what.capitalize()}", "white")
                 D.put(1, 1, "Pick up what?", "yellow")
-                D.put(16, 1, "(letters mark, ',' all, '-' none, Enter take, Tab put things in)", "dgrey")
+                if not PHONE:
+                    D.put(16, 1, "(letters mark, ',' all, '-' none, Enter take, Tab put things in)", "dgrey")
             else:
                 D.put(1, 0, f"Your pack", "white")
                 D.put(1, 1, f"Put what in the {what}?", "yellow")
-                D.put(25 + len(what), 1, "(letters mark, Enter put, Tab back)", "dgrey")
+                if not PHONE:
+                    D.put(25 + len(what), 1, "(letters mark, Enter put, Tab back)", "dgrey")
         else:
             D.put(1, 0, "Inventory", "white")
-            D.put(1, 1, "Choose something to look at it.", "yellow")
+            D.put(1, 1, ("Tap" if PHONE else "Choose") + " something to look at it.", "yellow")
         wcol = "lred" if kg_bag > self.cap else "grey"
         txt = f"Pack {kg_bag:4.1f}/{self.cap:.0f} kg"
-        D.put(79 - len(txt), 0, txt, wcol)
+        D.put(D.cols - 1 - len(txt), 0, txt, wcol)
         rows = self.menu_rows()
         self._row_at = {}
         y = 3
@@ -3430,8 +3579,8 @@ class Game:
             D.put(3, y, "There's nothing here." if self.loot and self.mode == "take" else "You aren't carrying anything.",
                   "dgrey")
         for kind, k, L in rows:
-            if y > 22:
-                D.put(3, 23, "...more (keep taking to see the rest)", "dgrey")
+            if y > D.rows - 4:
+                D.put(3, D.rows - 3, "...more (keep taking to see the rest)", "dgrey")
                 break
             if kind == "head":
                 name, sym = items.CATEGORY[k]
@@ -3446,33 +3595,38 @@ class Game:
                     name += " (in hand)"
                 D.put(8, y, name, "white" if mark == "+" else "grey")
                 wt = f"{items.ITEMS[k][2] * inv[k]:.1f} kg"
-                D.put(79 - len(wt), y, wt, "dgrey")
+                D.put(D.cols - 1 - len(wt), y, wt, "dgrey")
                 self._row_at[y] = k
+                self._tap_rows[y] = L
             y += 1
-        bar = "─" * 80
-        D.put(0, 24 - 1, bar, "dgrey")
         foot = ("[a-z] mark  [,] all  [-] none  [Enter] take  [Tab] put in  [Q] leave" if self.loot and self.mode == "take"
                 else "[a-z] mark  [Enter] put in  [Tab] take out  [Q] leave" if self.loot
                 else "[a-z] look at an item   [Q] close")
-        D.put(1, 24, foot, "grey")
+        if PHONE:
+            foot = ("Tap to mark  [All]  [Take]  [Put in]  [Back]" if self.loot and self.mode == "take"
+                    else "Tap to mark  [Put in]  [Take out]  [Back]" if self.loot else "Tap something to look at it  [Back]")
+        self.dos_foot(D, foot)
         if self.detail and self.detail in self.inv:            # one item, described, with what you can do
             k = self.detail
             name, kind, kg, _, eff = items.ITEMS[k]
             g, col = items.GLYPH[k]
-            D.box(8, 6, 64, 13, "grey", "black", f"{g} {name}")
+            bw = min(64, D.cols - 2)
+            bx_ = (D.cols - bw) // 2
+            D.box(bx_, 6, bw, 13, "grey", "black", f"{g} {name}")
             words, line, yy = items.DESC.get(k, "").split(), "", 8
             for w_ in words:                                     # wrap the description
-                if len(line) + len(w_) + 1 > 58:
-                    D.put(11, yy, line, "grey")
+                if len(line) + len(w_) + 1 > bw - 6:
+                    D.put(bx_ + 3, yy, line, "grey")
                     line, yy = "", yy + 1
                 line = (line + " " + w_).strip()
-            D.put(11, yy, line, "grey")
+            D.put(bx_ + 3, yy, line, "grey")
             stats = ", ".join(f"+{v} {n_}" for n_, v in eff.items())
-            D.put(11, 14, (stats + "   " if stats else "") + f"{kg:.1f} kg each, you have {self.inv[k]}", "cyan")
+            D.put(bx_ + 3, 14, (stats + "   " if stats else "") + f"{kg:.1f} kg each, you have {self.inv[k]}", "cyan")
             act = {"food": "[e]at", "drink": "[e] drink", "medical": "[a]pply",
                    "weapon": "[w]ield" if self.weapon != k else "[w] put away"}.get(kind, "")
-            D.put(11, 16, f"{act}   [d]rop   [Q] back".strip(), "yellow")
-        self._dos_place = D.blit_to(self.screen)
+            D.put(bx_ + 3, 16, f"{act}   [d]rop   [Q] back".strip() if not PHONE else
+                  "Use the buttons below", "yellow")
+        self._dos_place = self.dos_blit(D)
 
     def draw_death(self):
         sw, sh = self.screen.get_size()
@@ -3482,7 +3636,8 @@ class Game:
         for i, (s, f, col) in enumerate([("You died.", self.big, (255, 90, 90)),
                                          (f"Died of {self.killer} on turn {self.turn}." if self.killer in ("hunger", "thirst")
                                           else f"Killed by a {self.killer} on turn {self.turn}.", self.font, (230, 220, 220)),
-                                         ("Press Enter to wake up back in town.   Esc quits.", self.font, (170, 160, 160))]):
+                                         ("Tap Wake up to wake back in town." if PHONE else
+                                          "Press Enter to wake up back in town.   Esc quits.", self.font, (170, 160, 160))]):
             img = f.render(s, True, col)
             self.screen.blit(img, img.get_rect(center=(sw // 2, sh // 2 - 30 + i * 32)))
 
@@ -3498,6 +3653,8 @@ class Game:
         self.draw_hud()
         if self.dead:
             self.draw_death()
+            if self.phone:
+                self.phone.draw()
         pygame.display.flip()
         if time.monotonic() - self.last_save > 30 and not self.dead:
             self.save()
@@ -3520,16 +3677,19 @@ def main():
     os.makedirs(ROOT, exist_ok=True)
     pygame.init()
     pygame.key.set_repeat()                               # off: held keys are read every frame by Game.update
-    screen = pygame.display.set_mode((1280, 800), pygame.RESIZABLE)
+    if PHONE:                                            # upright, scaled up to fill the phone
+        screen = pygame.display.set_mode(phone.SIZE, pygame.SCALED | (pygame.FULLSCREEN if phone.ANDROID else 0))
+    else:
+        screen = pygame.display.set_mode((1280, 800), pygame.RESIZABLE)
     pygame.display.set_caption("Roguelike prototype")
     if not any(f in args for f in ("--play", "--new", "--seed", "--showcase", "--structures", "--shot")):
         import charcreate                                # the game opens on character creation
-        ch = charcreate.run(screen, ROOT)
+        ch = (charcreate.run_phone if PHONE else charcreate.run)(screen, ROOT)
         if not ch:
             quiet_exit()
             pygame.quit()
             return
-        args.append("--new")                             # a new character gets a new world
+        args.append("--play" if ch == "continue" else "--new")   # a new character gets a new world
     screen.fill((0, 0, 0))
     f = pygame.font.Font(None, 36)
     screen.blit(f.render("Making the world…", True, (220, 220, 220)), (40, 40))
@@ -3568,6 +3728,9 @@ def main():
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
                 running = False
+            elif e.type in (getattr(pygame, "APP_WILLENTERBACKGROUND", -1), getattr(pygame, "APP_DIDENTERBACKGROUND", -1)):
+                if not g.dead:
+                    g.save()                             # the phone may close the app while it's in the background
             elif not g.handle(e):
                 running = False
         g.update(min(0.05, clock.get_time() / 1000))

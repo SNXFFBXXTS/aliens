@@ -12,9 +12,8 @@ import json, math, os, random, time
 import pygame
 import heads
 
-CJK = "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc"
-UI = "/usr/share/fonts/noto/NotoSans-Regular.ttf"
-UIB = "/usr/share/fonts/noto/NotoSans-Bold.ttf"
+import fonts
+CJK, UI, UIB = fonts.find(fonts.CJK), fonts.find(fonts.UI), fonts.find(fonts.UIB)
 
 BODIES = [("人", "person"), ("大", "big"), ("天", "heaven"), ("夫", "husband"), ("太", "thick"), ("女", "woman"),
           ("子", "child"), ("兵", "soldier"), ("立", "stand"), ("走", "run"), ("光", "light"), ("元", "origin"),
@@ -851,13 +850,21 @@ def run(screen, root, shot=None, setup=None):
                 screen.set_clip(None)
                 if abs(hu - 0.3) < 0.03 and (not hits or hits[-1][2] != (headfx, "nova")):
                     hits.append((now, "head", (headfx, "nova")))
-            elif pw == "scout":                                # off it goes, to look
-                k = min(1.0, hu / 0.3) if hu < 0.7 else max(0.0, 1 - (hu - 0.7) / 0.3)
-                hx, hy = hx0 + 260 * k, hy0 - 150 * k + 8 * math.sin(now * 6)
-                if 0.3 < hu < 0.7:
-                    pygame.draw.circle(screen, (60, 70, 50), (int(hx), int(hy)), 120, 2)
-                    screen.blit(tiny.render("you see what it sees", True, (150, 160, 140)), (int(hx) - 60, int(hy) + 60))
-                draw_head(screen, int(hx), int(hy), 88, hd["glyph"], skin, 0)
+            elif pw == "scout":                                # Red eye: lifts off, lasers every which way
+                lift_ = min(1.0, hu / 0.12) if hu < 0.85 else max(0.0, 1 - (hu - 0.85) / 0.15)
+                hx, hy = hx0 + random.randint(-2, 2), int(hy0 - 70 * lift_)
+                pygame.draw.circle(screen, (90, 10, 10), (hx, hy), 58)
+                if 0.12 < hu < 0.85:
+                    rnd = random.Random(int(now * 9))              # a new burst every ~0.1 s, some at the dummy
+                    for q in range(rnd.choice((0, 1, 2, 3))):
+                        ang = math.atan2(cy - hy, dummy_x - hx) if rnd.random() < 0.5 else rnd.uniform(0, 2 * math.pi)
+                        ex, ey = hx + math.cos(ang) * 600, hy + math.sin(ang) * 600
+                        pygame.draw.line(screen, (150, 10, 10), (hx, hy), (ex, ey), 9)
+                        pygame.draw.line(screen, (255, 40, 40), (hx, hy), (ex, ey), 5)
+                        pygame.draw.line(screen, (255, 210, 200), (hx, hy), (ex, ey), 2)
+                        if abs(ang - math.atan2(cy - hy, dummy_x - hx)) < 0.05 and (not hits or now - hits[-1][0] > 0.2):
+                            hits.append((now, "head", (headfx, round(hu, 2))))
+                draw_head(screen, hx, hy, 88, hd["glyph"], skin, 0)
             nm_ = mid.render(P["name"], True, look[5])
             screen.blit(nm_, (cx + 30 - nm_.get_width() // 2, 150))
         # effects
@@ -1013,4 +1020,226 @@ def run(screen, root, shot=None, setup=None):
                 continue
             pygame.image.save(screen, shot)
             return
+        clock.tick(30)
+
+
+def run_phone(screen, root):
+    """the character screen on a phone: upright, everything on big buttons.
+    Returns the new character, "continue" (carry on the last game), or None (back out)."""
+    import phone
+    big, mid, small, tiny = _font(UIB, 24), _font(UIB, 16), _font(UI, 13), _font(UI, 11)
+    rn = lambda: f"{random.choice(FIRST)} {random.choice(LAST)}"
+    st = dict(arch=random.randrange(len(ARCH)), body=random.randrange(len(BODIES)), skin=random.randrange(len(SKINS)),
+              name=rn(), mut=random.choice(MUTATIONS), jacket=None, trousers=None, weapon=None)
+    can_go_on = all(os.path.exists(os.path.join(root, f)) for f in ("current.json", "character.json"))
+    WLIST = [None] + list(OLD_WEAPONS)
+    picking, fight, headfx = False, None, None
+    clock = pygame.time.Clock()
+    sw, sh = screen.get_size()
+
+    def now_look():
+        a = ARCH[st["arch"]]
+        look = a["look"]
+        if st["weapon"]:
+            look = (look[0], st["weapon"]) + tuple(look[2:])
+        return a, look
+
+    def wear(key, n):
+        v = st[key]
+        st[key] = 0 if v is None else (None if v + 1 >= n else v + 1)
+
+    def spar():
+        nonlocal fight
+        mv = MOVES[STYLE.get(now_look()[1][1], "unarmed")]
+        prev = fight[0] if fight else None
+        fight = (mv[(mv.index(prev) + 1) % 3] if prev in mv else mv[0], time.monotonic())
+
+    def begin():
+        a, look = now_look()
+        d = dict(name=st["name"], archetype=a["name"], body=BODIES[st["body"]][0], skin_rgb=SKINS[st["skin"]][1],
+                 look=list(look[:4]), head=a.get("head") or heads.default_head(look), coat=look[4], trim=look[5],
+                 stats=dict(zip(STATS, a["stats"])), traits=[t for t, _ in a["traits"]], kit=a["kit"],
+                 mutation=st["mut"] if look[3] == "mutation" else None, jacket=st["jacket"], trousers=st["trousers"],
+                 weapon_item=look[1] if look[1] in OLD_WEAPONS else None)
+        os.makedirs(root, exist_ok=True)
+        with open(os.path.join(root, "character.json"), "w") as f:
+            json.dump(d, f, indent=1, ensure_ascii=False)
+        return d
+
+    def step(key, n, d):
+        st[key] = (st[key] + d) % n
+
+    def buttons():
+        """[(label, rect, what it does)] for this frame"""
+        if picking:
+            out = []
+            for j, wk in enumerate(WLIST):
+                out.append((wk or "own", pygame.Rect(20, 120 + j * 44, sw - 40, 40), ("pick", wk)))
+            out.append(("Back", pygame.Rect(20, 120 + len(WLIST) * 44 + 8, sw - 40, 44), ("close",)))
+            return out
+        y0, bh, g = 640, 50, 6
+        w3 = (sw - 16 - 2 * g) // 3
+        R = lambda col, row, span=1: pygame.Rect(8 + col * (w3 + g), y0 + row * (bh + g), w3 * span + g * (span - 1), bh)
+        out = [("‹ Who", R(0, 0), ("arch", -1)), ("Random", R(1, 0), ("random",)), ("Who ›", R(2, 0), ("arch", 1)),
+               ("‹ Body", R(0, 1), ("body", -1)), ("Skin", R(1, 1), ("skin",)), ("Body ›", R(2, 1), ("body", 1)),
+               ("Jacket", R(0, 2), ("jacket",)), ("Trousers", R(1, 2), ("trousers",)), ("Weapon", R(2, 2), ("weapons",)),
+               ("Spar", R(0, 3), ("spar",)), ("Head", R(1, 3), ("head",)), ("New name", R(2, 3), ("name",))]
+        if can_go_on:
+            out += [("Continue", R(0, 4), ("continue",)), ("BEGIN", R(1, 4, 2), ("begin",))]
+        else:
+            out += [("BEGIN", R(0, 4, 3), ("begin",))]
+        return out
+
+    while True:
+        now = time.monotonic()
+        a, look = now_look()
+        style = STYLE.get(look[1], "unarmed")
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                return None
+            if e.type == pygame.KEYDOWN and e.key in (pygame.K_AC_BACK, pygame.K_ESCAPE, pygame.K_q):
+                if picking:
+                    picking = False
+                elif e.key != pygame.K_q:
+                    return None
+                continue
+            p = phone.pointer(e, screen)
+            if not p or p == "skip" or e.type not in (pygame.FINGERDOWN, pygame.MOUSEBUTTONDOWN):
+                continue
+            _, x, y = p
+            if not picking and pygame.Rect(0, 30, sw, 40).collidepoint(x, y):
+                st["name"] = rn()
+                continue
+            hit = next((act for _, r, act in buttons() if r.collidepoint(x, y)), None)
+            if not hit:
+                continue
+            k = hit[0]
+            if k == "pick":
+                st["weapon"], picking, fight = hit[1], False, None
+            elif k == "close":
+                picking = False
+            elif k == "arch":
+                step("arch", len(ARCH), hit[1]); fight = None; st["weapon"] = None
+            elif k == "body":
+                step("body", len(BODIES), hit[1])
+            elif k == "skin":
+                step("skin", len(SKINS), 1)
+            elif k in ("jacket", "trousers"):
+                wear(k, len(JACKETS if k == "jacket" else TROUSERS))
+            elif k == "weapons":
+                picking = True
+            elif k == "random":
+                st.update(arch=random.randrange(len(ARCH)), body=random.randrange(len(BODIES)),
+                          skin=random.randrange(len(SKINS)), name=rn(), weapon=None,
+                          jacket=random.choice([None] + list(range(len(JACKETS)))),
+                          trousers=random.choice([None] + list(range(len(TROUSERS)))))
+                fight = None
+            elif k == "spar":
+                spar()
+            elif k == "head":
+                headfx = now
+            elif k == "name":
+                st["name"] = rn()
+            elif k == "continue":
+                return "continue"
+            elif k == "begin":
+                return begin()
+        a, look = now_look()
+        style = STYLE.get(look[1], "unarmed")
+        hd = a.get("head") or heads.default_head(look)
+        screen.fill((10, 9, 14))
+        for i in range(40):                                    # drifting stars
+            x = (i * 157 + int(now * (3 + i % 5))) % sw
+            screen.fill((90, 90, 110), (x, (i * 97) % sh, 2, 2))
+        if picking:
+            screen.blit(big.render("Choose a weapon", True, (240, 220, 160)), (20, 30))
+            screen.blit(tiny.render("Old weapons of Japan and China. Tap one.", True, (150, 150, 165)), (20, 66))
+            screen.blit(tiny.render("Their own weapon is first.", True, (150, 150, 165)), (20, 84))
+            for label, r, act in buttons():
+                on = act[0] == "pick" and act[1] == st["weapon"]
+                pygame.draw.rect(screen, (60, 52, 80) if on else (30, 27, 40), r, border_radius=8)
+                if act[0] == "close":
+                    t = mid.render("Back", True, (240, 235, 220))
+                    screen.blit(t, t.get_rect(center=r.center))
+                    continue
+                wk = act[1]
+                if wk is None:
+                    own = a["look"][1]
+                    screen.blit(mid.render(f"Their own: {WEAPONS[own][1] if own else 'bare hands'}", True,
+                                           (240, 235, 220)), (r.x + 14, r.y + 9))
+                    continue
+                g_, n_, where, sty = OLD_WEAPONS[wk]
+                screen.blit(glyph(g_, 24, look[5] if on else (205, 208, 215)), (r.x + 10, r.y + 4))
+                screen.blit(mid.render(n_, True, (240, 235, 220)), (r.x + 50, r.y + 9))
+                t = tiny.render(f"{where} · {sty}", True, (130, 130, 145))
+                screen.blit(t, (r.right - t.get_width() - 12, r.y + 13))
+            pygame.display.flip()
+            clock.tick(30)
+            continue
+        screen.blit(tiny.render("NEW DRIFTER  ·  tap the name for another", True, (150, 150, 165)), (12, 10))
+        nm = big.render(st["name"], True, (245, 240, 230))
+        screen.blit(nm, (sw // 2 - nm.get_width() // 2, 32))
+        # them, sparring or idling, with their head showing off when asked
+        cx, cy = sw // 2, 245
+        pose = {"dy": math.sin(now * 2.2) * 3}
+        if fight:
+            u = (now - fight[1]) / 1.4
+            if u >= 1:
+                fight = None
+            else:
+                pose = pose_for(style, fight[0], u, 150)[0]
+        hu = (now - headfx) / 1.6 if headfx else None
+        if hu is not None and hu >= 1:
+            headfx, hu = None, None
+        draw_char(screen, cx, cy, 150, BODIES[st["body"]][0], look, SKINS[st["skin"]][1], None, pose,
+                  head="" if hu is not None else hd["glyph"], clothes=(st["jacket"], st["trousers"]))
+        if hu is not None:                                     # a simple show of the head: off, round, back on
+            ang = hu * 2 * math.pi
+            hx, hy = cx + math.sin(ang) * 120, cy - 95 - math.sin(math.pi * hu) * 40
+            if hd["power"] == "scout" and 0.1 < hu < 0.9:
+                rnd = random.Random(int(now * 9))
+                for _ in range(rnd.choice((1, 2, 3))):
+                    a_ = rnd.uniform(0, 2 * math.pi)
+                    ex, ey = hx + math.cos(a_) * 400, hy + math.sin(a_) * 400
+                    pygame.draw.line(screen, (150, 10, 10), (hx, hy), (ex, ey), 7)
+                    pygame.draw.line(screen, (255, 40, 40), (hx, hy), (ex, ey), 3)
+            draw_head(screen, int(hx), int(hy), 64, hd["glyph"], SKINS[st["skin"]][1], hu * 360)
+        # who they are
+        y = 340
+        t = mid.render(a["name"], True, look[5])
+        screen.blit(t, (sw // 2 - t.get_width() // 2, y))
+        t = tiny.render(f"{a['tag']}  ·  {ARCH.index(a) + 1}/{len(ARCH)}", True, (130, 130, 145))
+        screen.blit(t, (sw // 2 - t.get_width() // 2, y + 22))
+        y += 42
+        for ln in wrap(small, a["blurb"], sw - 30)[:3]:
+            screen.blit(small.render(ln, True, (200, 198, 210)), (15, y))
+            y += 17
+        y += 6
+        for i, (lab, v) in enumerate(zip(STATS, a["stats"])):    # stats in two columns
+            x = 15 + (i % 2) * (sw // 2)
+            yy = y + (i // 2) * 18
+            screen.blit(tiny.render(lab, True, (170, 170, 180)), (x, yy))
+            pygame.draw.rect(screen, (40, 36, 52), (x + 34, yy + 4, 150, 8), border_radius=4)
+            pygame.draw.rect(screen, look[5], (x + 34, yy + 4, 15 * v, 8), border_radius=4)
+        y += 60
+        P = heads.POWERS[hd["power"]]
+        screen.blit(glyph(hd["glyph"], 18, look[5]), (15, y))
+        screen.blit(small.render(f"Head: {P['name']}", True, look[5]), (40, y + 1))
+        y += 22
+        for ln in wrap(tiny, P["what"], sw - 30)[:2]:
+            screen.blit(tiny.render(ln, True, (190, 188, 200)), (15, y))
+            y += 15
+        y += 6
+        jn = JACKETS[st["jacket"]]["name"] if st["jacket"] is not None else "own jacket"
+        tn = TROUSERS[st["trousers"]]["name"] if st["trousers"] is not None else "own trousers"
+        screen.blit(small.render(f"Fights with: {WEAPONS[look[1]][1]}", True, (220, 218, 230)), (15, y))
+        screen.blit(small.render(f"Wearing: {jn}, {tn}", True, (220, 218, 230)), (15, y + 18))
+        for label, r, act in buttons():
+            hot = act[0] in ("begin", "continue")
+            pygame.draw.rect(screen, (96, 80, 50) if act[0] == "begin" else (50, 46, 66) if hot else (34, 30, 46), r,
+                             border_radius=10)
+            pygame.draw.rect(screen, (240, 220, 160) if hot else (90, 84, 110), r, 2, border_radius=10)
+            t = mid.render(label, True, (245, 240, 230))
+            screen.blit(t, t.get_rect(center=r.center))
+        pygame.display.flip()
         clock.tick(30)

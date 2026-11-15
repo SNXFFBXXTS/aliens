@@ -8,17 +8,18 @@ VGA = {"black": (0, 0, 0), "blue": (0, 0, 170), "green": (0, 170, 0), "cyan": (0
        "lblue": (85, 85, 255), "lgreen": (85, 255, 85), "lcyan": (85, 255, 255), "lred": (255, 85, 85),
        "lmagenta": (255, 85, 255), "yellow": (255, 255, 85), "white": (255, 255, 255)}
 COLS, ROWS, CW, CH = 80, 25, 8, 16
-FONTS = [os.path.expanduser("~/.local/share/fonts/ProggyCleanNerdFontMono-Regular.ttf"),
-         "/usr/share/fonts/TTF/DejaVuSansMono.ttf", "/usr/share/fonts/noto/NotoSansMono-Regular.ttf"]
+import fonts
+FONTS = [fonts.find(fonts.PIXEL), fonts.find(fonts.MONO), fonts.find(fonts.MONO2)]
 
 
 class Dos:
-    def __init__(self):
+    def __init__(self, cols=COLS, rows=ROWS):
+        self.cols, self.rows = cols, rows                 # 80 x 25 on the PC; tall and narrow on a phone
         path = next((p for p in FONTS if os.path.exists(p)), None)
         self.font = pygame.font.Font(path, 16 if path and "Proggy" in path else 13)
         sym = next((p for p in FONTS[1:] if os.path.exists(p)), path)
         self.symbols = pygame.font.Font(sym, 13)
-        self.surf = pygame.Surface((COLS * CW, ROWS * CH))
+        self.surf = pygame.Surface((cols * CW, rows * CH))
         self.cache = {}
 
     # box-drawing: which sides each piece reaches, and whether it's double. Drawn as exact pixels, like VGA.
@@ -67,7 +68,7 @@ class Dos:
 
     def put(self, x, y, text, fg="grey", bg=None):
         for i, ch in enumerate(text):
-            if 0 <= x + i < COLS and 0 <= y < ROWS:
+            if 0 <= x + i < self.cols and 0 <= y < self.rows:
                 if bg:
                     pygame.draw.rect(self.surf, VGA[bg], ((x + i) * CW, y * CH, CW, CH))
                 if ch != " ":
@@ -87,14 +88,15 @@ class Dos:
         if title:
             self.put(x + 2, y, f" {title} ", "white", bg)
 
-    def blit_to(self, screen):
-        """scale up to fill the screen (keeping 640x400's shape), hard pixel edges, black bars"""
-        sw, sh = screen.get_size()
-        k = min(sw / self.surf.get_width(), sh / self.surf.get_height())
+    def blit_to(self, screen, area=None):
+        """scale up to fill the screen (or area, a Rect), keeping the shape: hard pixel edges, black bars"""
+        area = pygame.Rect(area or screen.get_rect())
+        k = min(area.w / self.surf.get_width(), area.h / self.surf.get_height())
         w, h = int(self.surf.get_width() * k), int(self.surf.get_height() * k)
-        screen.fill((0, 0, 0))
-        screen.blit(pygame.transform.scale(self.surf, (w, h)), ((sw - w) // 2, (sh - h) // 2))
-        return ((sw - w) // 2, (sh - h) // 2, k)
+        screen.fill((0, 0, 0), area)
+        x0, y0 = area.x + (area.w - w) // 2, area.y + (area.h - h) // 2 if area.h > h + 2 else area.y
+        screen.blit(pygame.transform.scale(self.surf, (w, h)), (x0, y0))
+        return (x0, y0, k)
 
     def cell_at(self, pos, place):
         ox, oy, k = place

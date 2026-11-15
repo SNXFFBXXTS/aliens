@@ -175,3 +175,14 @@ Items/loot, spells (shape x element x twist), shops in towns, character creation
   goes in your hand at the start (character.json "weapon_item"). Attack animation style follows the wielded weapon.
 - Q closes every menu/overlay (bag, item box, containers, build menu + placing, map, size slider, outfit, the creation
   weapon picker and builder editing). It never quits the game. So menu letters skip q (Game.LETTERS); drinks are [e].
+
+## Red eye lasers + phone mode (Nov 2026)
+- Head power "scout" is now "Red eye" (key kept as "scout" so old characters still load): F lifts the head over you
+  and for 2.6 s it fires red lasers in sporadic bursts (Game.fire_laser: 60% at a creature in reach, else roughly
+  where you face or anywhere); a beam kills anything it touches (damage = its hp), walls stop it, tame animals are safe.
+- Phone mode (phone.py): on by itself on Android, `rl --phone` on the PC. 450x1000 logical screen (pygame.SCALED),
+  HUD_H/LOG_H from phone.py, touch panel at the bottom (phone.Controls: joystick + buttons that press the game's
+  own keys; buttons change with what's open). Menus use a 56x46 DOS screen above the panel (Game.dos_screen /
+  dos_blit / dos_foot; taps on rows use Game._tap_rows). charcreate.run_phone = upright character screen (archetypes
+  only, no builder; "Continue" carries on the last world). Tap in the world aims your head there.
+  On Android: RL_NOPROC, world map drawn in a thread, fonts from game/fonts/ (fonts.find; copied in by the build).

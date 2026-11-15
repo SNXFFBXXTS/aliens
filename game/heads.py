@@ -5,7 +5,7 @@
   shield     it orbits you, taking blows meant for you and clipping anything close
   spin       it whirls round you on a chain, wide and fast, hitting everything in reach
   nova       it screams: a ring that hits and stuns everything round you
-  scout      you send it off to look; you see what it sees, until it comes home
+  scout      "Red eye": it lifts off and fires red lasers in bursts, every which way; anything a laser touches dies
 
 F uses it toward where you're facing; right-click aims it at the mouse.
 """
@@ -24,7 +24,8 @@ POWERS = {
                    cd=4.0, time=8.0),
     "spin": dict(name="Chain whirl", what="Your head whirls round you on a chain, wide and fast.", cd=3.5, time=4.0),
     "nova": dict(name="Scream", what="Your head screams. Everything round you is blown back and stunned.", cd=2.5),
-    "scout": dict(name="Send it off", what="Send your head ahead to look. You see what it sees.", cd=2.0, time=7.0),
+    "scout": dict(name="Red eye", what="Your head lifts off and fires red lasers every which way. One touch kills.",
+                  cd=3.0, time=2.6),          # (still called "scout" inside: old characters keep their head)
 }
 
 
@@ -65,9 +66,9 @@ TUTORIAL = {
     "nova": ["F: your head lifts off your shoulders and screams.",
              "Everything within four steps is hit and stunned.",
              "Save it for when you're surrounded."],
-    "scout": ["Right-click where you want to look (F sends it ahead).",
-              "Your head drifts there and you see what it sees.",
-              "Your body is nearly blind until it comes home."],
+    "scout": ["F: your head lifts off and its eyes open red.",
+              "It fires lasers in bursts, every which way, for a few seconds.",
+              "Anything a laser touches dies. Walls stop them."],
 }
 CLASS_FOR = {"boomerang": "Head Thrower", "fire": "Ember Saint", "frost": "Frost Widow", "storm": "Storm Oracle",
              "rot": "Rot Priest", "shield": "Gate Warden", "spin": "Chain Monk", "nova": "Bell Ringer", "scout": "Watcher"}
