@@ -39,6 +39,59 @@ WEAPONS = {None: ("", "—"), "revolver": ("銃", "revolver"), "shotgun": ("砲"
            "fists": ("拳", "fists"), "claws": ("爪", "claws"), "mecharm": ("機", "machine arm"), "tome": ("書", "tome"),
            "deck": ("電", "deck"), "orb": ("珠", "orb"), "sax": ("楽", "saxophone"), "bow": ("弓", "bow"),
            "shield": ("盾", "riot shield"), "flask": ("瓶", "flasks")}
+# old Japanese and Chinese weapons: you can pick one to start with, and they turn up in the world (items.ITEMS)
+OLD_WEAPONS = {
+    "katana": ("剣", "katana", "Japan", "blade"), "wakizashi": ("脇", "wakizashi", "Japan", "blade"),
+    "tanto": ("短", "tantō", "Japan", "blade"), "naginata": ("薙", "naginata", "Japan", "staff"),
+    "yari": ("槍", "yari", "Japan", "staff"), "kusarigama": ("鎌", "kusarigama", "Japan", "whip"),
+    "kanabo": ("棒", "kanabō", "Japan", "heavy"), "yumi": ("弓", "yumi", "Japan", "bow"),
+    "jian": ("剑", "jian", "China", "blade"), "dao": ("刀", "dao", "China", "blade"),
+    "guandao": ("偃", "guan dao", "China", "heavy"), "ji": ("戟", "ji halberd", "China", "staff"),
+    "meteor": ("錘", "meteor hammer", "China", "whip"), "hooks": ("鉤", "hook swords", "China", "blade"),
+    "butterfly": ("蝶", "butterfly swords", "China", "blade"), "chukonu": ("弩", "chu-ko-nu", "China", "bow"),
+}
+WEAPONS.update({k: (g, n) for k, (g, n, _, _) in OLD_WEAPONS.items()})
+
+# clothes: what you wear changes your colours (jacket over the middle, trousers on the legs) and helps a little
+JACKETS = [
+    dict(name="Flight jacket", col=(112, 72, 44), hem=(206, 190, 160), armour=1, speed=0, carry=0,
+         what="Cracked leather, sheepskin collar. Takes a knock."),
+    dict(name="Haori", col=(38, 48, 104), hem=(225, 225, 215), armour=0, speed=5, carry=0,
+         what="A light indigo coat tied with white cord. Nothing holds you back."),
+    dict(name="Colony parka", col=(196, 112, 34), hem=(60, 58, 70), armour=1, speed=0, carry=3,
+         what="Hi-vis orange, colony issue. Deep pockets."),
+    dict(name="Lamellar coat", col=(96, 100, 110), hem=(170, 56, 48), armour=2, speed=-6, carry=0,
+         what="Iron plates laced with red cord. Heavy, and hard to get through."),
+    dict(name="Silk tangzhuang", col=(156, 34, 58), hem=(214, 172, 88), armour=0, speed=7, carry=0,
+         what="Red silk, knotted gold buttons. Light and quick."),
+]
+TROUSERS = [
+    dict(name="Cargo trousers", col=(84, 96, 52), hem=None, armour=0, speed=0, carry=4,
+         what="Pockets on the pockets."),
+    dict(name="Hakama", col=(44, 42, 54), hem=(150, 150, 165), armour=0, speed=3, carry=1,
+         what="Wide pleated trousers. They hide which way your feet are going."),
+    dict(name="Work jeans", col=(46, 70, 126), hem=(150, 120, 70), armour=1, speed=0, carry=1,
+         what="Heavy denim, double-stitched. Hard to bite through."),
+    dict(name="Kung fu trousers", col=(50, 50, 60), hem=(230, 230, 230), armour=0, speed=8, carry=0,
+         what="Black cotton, tied at the ankle. Made for moving."),
+    dict(name="Plated greaves", col=(118, 118, 126), hem=(64, 62, 74), armour=1, speed=-4, carry=0,
+         what="Trousers with iron plates sewn down the shins."),
+]
+
+
+def outfit_bonus(jacket, trousers):
+    """(armour, speed %, carry kg) from what you're wearing (None = your own old clothes: nothing extra)"""
+    got = [c for c in ((JACKETS[jacket] if jacket is not None else None),
+                       (TROUSERS[trousers] if trousers is not None else None)) if c]
+    return tuple(sum(c[k] for c in got) for k in ("armour", "speed", "carry"))
+
+
+def bonus_text(c):
+    bits = [f"+{c['armour']} armour" if c["armour"] else "", f"{c['speed']:+d}% speed" if c["speed"] else "",
+            f"+{c['carry']} kg carry" if c["carry"] else ""]
+    return ", ".join(b for b in bits if b) or "nothing extra"
+
+
 BACKS = {None: ("", "—"), "duster": ("衣", "duster coat"), "pack": ("包", "backpack"), "cloak": ("套", "cloak"),
          "quiver": ("矢", "quiver"), "tank": ("缶", "tank")}
 EXTRAS = {None: ("", "—"), "vest": ("甲", "armour vest"), "scarf": ("巾", "scarf"), "belt": ("帯", "toolbelt"),
@@ -50,6 +103,7 @@ STYLE = {"revolver": "gun", "shotgun": "gun", "derringer": "gun", "rifle": "gun"
          "spade": "heavy", "staff": "staff", "whip": "whip", "fists": "unarmed", "claws": "unarmed", "mecharm": "unarmed",
          "tome": "magic", "deck": "magic", "orb": "magic", "sax": "magic", "bow": "bow", "shield": "shield",
          "flask": "throw", None: "unarmed"}
+STYLE.update({k: v[3] for k, v in OLD_WEAPONS.items()})
 MOVES = {"gun": ["Snap shot", "Fan the hammer", "Diving shot"], "blade": ["Slash", "Thrust", "Spinning cut"],
          "heavy": ["Overhead smash", "Wide swing", "Shoulder charge"], "staff": ["Sweep", "Vault kick", "Twirl"],
          "whip": ["Crack", "Lash", "Snare"], "unarmed": ["Jab-cross", "Roundhouse", "Uppercut"],
@@ -320,10 +374,15 @@ def blit_rot(screen, surf, cx, cy, ang):
     screen.blit(surf, (cx - surf.get_width() // 2, cy - surf.get_height() // 2))
 
 
-def draw_char(screen, cx, cy, size, body, look, skin, mut=None, pose=None, head=None):
+def draw_char(screen, cx, cy, size, body, look, skin, mut=None, pose=None, head=None, clothes=None):
     """the body symbol, two-toned (skin above, clothes below), gear symbols placed on it, posed for a move.
-    head = the head's kanji (drawn on top of the body), "" if it's off somewhere, None for the old headless look"""
+    head = the head's kanji (drawn on top of the body), "" if it's off somewhere, None for the old headless look
+    clothes = (jacket index, trousers index): jacket over the middle, trousers on the legs (None = own clothes)"""
     hat, weapon, back, extra, coat, trim = look
+    jk = JACKETS[clothes[0]] if clothes and clothes[0] is not None else None
+    tr = TROUSERS[clothes[1]] if clothes and clothes[1] is not None else None
+    if jk:
+        coat = jk["col"]
     p = pose or {}
     dx, dy, tilt = p.get("dx", 0), p.get("dy", 0), p.get("tilt", 0)
     dark = tuple(int(v * 0.55) for v in coat)
@@ -337,6 +396,16 @@ def draw_char(screen, cx, cy, size, body, look, skin, mut=None, pose=None, head=
     two = pygame.Surface((w, h), pygame.SRCALPHA)               # two-toned body: skin over the top
     two.blit(g_coat, (0, 0))
     two.blit(glyph(body, size, skin), (0, 0), pygame.Rect(0, 0, w, int(h * 0.42)))
+
+    def band(col, y0, y1):                                     # one horizontal slice of the body in another colour
+        y0, y1 = int(h * y0), int(h * y1)
+        two.blit(glyph(body, size, col), (0, y0), pygame.Rect(0, y0, w, y1 - y0))
+    if tr:
+        band(tr["col"], 0.68, 1.0)
+        if tr["hem"]:
+            band(tr["hem"], 0.93, 1.0)                         # cuffs / ankle ties
+    if jk and jk["hem"]:
+        band(jk["hem"], 0.63, 0.68)                            # the jacket's hem
     if extra and extra != "mutation":
         e = glyph(EXTRAS[extra][0], int(size * 0.3), trim)
         two.blit(e, (w // 2 - e.get_width() // 2, int(h * (0.42 if extra != "scarf" else 0.3))))
@@ -494,7 +563,9 @@ def run(screen, root, shot=None, setup=None):
     big, mid, small, tiny = _font(UIB, 32), _font(UIB, 19), _font(UI, 15), _font(UI, 13)
     cjk = _font(CJK, 40)
     rn = lambda: f"{random.choice(FIRST)} {random.choice(LAST)}"
-    st = dict(arch=0, body=0, skin=1, name=rn(), mut=random.choice(MUTATIONS))
+    st = dict(arch=0, body=0, skin=1, name=rn(), mut=random.choice(MUTATIONS), jacket=None, trousers=None, weapon=None)
+    WLIST = [None] + list(OLD_WEAPONS)                         # the weapon picker: their own, then the old weapons
+    picking = None                                            # row in the weapon picker while it's open
     # the builder's own character
     cu = dict(body=15, skin=1, coat=0, trim=0, hat=1, weapon=1, back=1, extra=0,
               stats=[5, 5, 5, 5, 5, 5], good=[0, 1], bad=0)
@@ -521,9 +592,30 @@ def run(screen, root, shot=None, setup=None):
                              (BAD[cu["bad"]][0], "- " + BAD[cu["bad"]][1])],
                      kit=[n for n in (HATS[look[0]][1], WEAPONS[look[1]][1], BACKS[look[2]][1], EXTRAS[look[3]][1]) if n != "—"],
                      look=look)
-            return a, look, BODIES[cu["body"]][0], SKINS[cu["skin"]][1]
+            return a, pick(look), BODIES[cu["body"]][0], SKINS[cu["skin"]][1]
         a = items[st["arch"]]
-        return a, a["look"], BODIES[st["body"]][0], SKINS[st["skin"]][1]
+        return a, pick(a["look"]), BODIES[st["body"]][0], SKINS[st["skin"]][1]
+
+    def pick(look):
+        """the look with the weapon from the picker in their hand"""
+        return (look[0], st["weapon"]) + tuple(look[2:]) if st["weapon"] else look
+
+    def wear(key, n):                                         # J / T: next jacket / trousers (then back to their own)
+        v = st[key]
+        st[key] = 0 if v is None else (None if v + 1 >= n else v + 1)
+
+    def outfit_key(k):
+        """J, T and X work everywhere on this screen. True if the key was one of them"""
+        nonlocal picking
+        if k == pygame.K_j:
+            wear("jacket", len(JACKETS))
+        elif k == pygame.K_t:
+            wear("trousers", len(TROUSERS))
+        elif k == pygame.K_x:
+            picking = WLIST.index(st["weapon"])
+        else:
+            return False
+        return True
 
     def change(r, d):
         if r < 8:
@@ -559,9 +651,25 @@ def run(screen, root, shot=None, setup=None):
                 continue
             last_input = now
             k = e.key
+            if picking is not None:                            # the weapon picker has the keys
+                L = "abcdefghijklmnoprstuvwxyz"[:len(WLIST)]
+                if k in (pygame.K_ESCAPE, pygame.K_q, pygame.K_x):
+                    picking = None
+                elif k in (pygame.K_UP, pygame.K_w):
+                    picking = (picking - 1) % len(WLIST)
+                elif k in (pygame.K_DOWN, pygame.K_s):
+                    picking = (picking + 1) % len(WLIST)
+                elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) or (e.unicode and e.unicode in L):
+                    if k not in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                        picking = L.index(e.unicode)
+                    st["weapon"], picking = WLIST[picking], None
+                    fight = None
+                continue
             if editing:
-                if k in (pygame.K_ESCAPE, pygame.K_TAB):
+                if k in (pygame.K_ESCAPE, pygame.K_TAB) or (k == pygame.K_q and ROWS[row] != "Name"):
                     editing = False
+                elif ROWS[row] != "Name" and outfit_key(k):
+                    pass
                 elif k in (pygame.K_UP,):
                     row = (row - 1) % len(ROWS)
                 elif k in (pygame.K_DOWN,):
@@ -599,6 +707,8 @@ def run(screen, root, shot=None, setup=None):
                     cu["skin"] = (cu["skin"] + 1) % len(SKINS)
                 else:
                     st["skin"] = (st["skin"] + 1) % len(SKINS)
+            elif outfit_key(k):
+                fight = None
             elif k == pygame.K_n:
                 st["name"] = rn()
             elif k == pygame.K_h:
@@ -611,11 +721,14 @@ def run(screen, root, shot=None, setup=None):
                 st.update(arch=random.randrange(1, len(items)), body=random.randrange(len(BODIES)),
                           skin=random.randrange(len(SKINS)), name=rn(), mut=random.choice(MUTATIONS))
             elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                a, look, body, skin = current()                # (anything changed earlier this frame counts)
                 d = dict(name=st["name"], archetype=a["name"], body=body, skin_rgb=skin, look=list(look[:4]),
                          head=a.get("head") or heads.default_head(look),
                          coat=look[4], trim=look[5], stats=dict(zip(STATS, a["stats"])),
                          traits=[t for t, _ in a["traits"]], kit=a["kit"],
-                         mutation=st["mut"] if look[3] == "mutation" else None)
+                         mutation=st["mut"] if look[3] == "mutation" else None,
+                         jacket=st["jacket"], trousers=st["trousers"],
+                         weapon_item=look[1] if look[1] in OLD_WEAPONS else None)
                 os.makedirs(root, exist_ok=True)
                 with open(os.path.join(root, "character.json"), "w") as f:
                     json.dump(d, f, indent=1, ensure_ascii=False)
@@ -682,7 +795,8 @@ def run(screen, root, shot=None, setup=None):
             headfx, hu = None, None
         pw = hd["power"]
         away = hu is not None and (pw in ("boomerang", "shield", "spin", "scout") or hu < 0.75)   # it always comes off
-        draw_char(screen, cx, cy, 200, body, look, skin, mut, pose, head="" if away else hd["glyph"])
+        draw_char(screen, cx, cy, 200, body, look, skin, mut, pose, head="" if away else hd["glyph"],
+                  clothes=(st["jacket"], st["trousers"]))
         if hu is not None:
             hx0, hy0 = cx + int(pose.get("dx", 0)), cy - 125
             P = heads.POWERS[pw]
@@ -785,8 +899,11 @@ def run(screen, root, shot=None, setup=None):
         bi = cu["body"] if st["arch"] == 0 else st["body"]
         gl = cjk.render(BODIES[bi][0], True, look[5])
         screen.blit(gl, (cx - 140, 572))
-        screen.blit(small.render(f"Body {bi + 1}/20 — {BODIES[bi][1]}", True, (180, 180, 190)), (cx - 86, 582))
-        screen.blit(small.render(f"Fights with: {WEAPONS[look[1]][1]}  ·  F to spar", True, (150, 150, 165)), (cx - 86, 604))
+        screen.blit(small.render(f"Body {bi + 1}/20 — {BODIES[bi][1]}  ·  Fights with: {WEAPONS[look[1]][1]}  (X weapon)",
+                                 True, (180, 180, 190)), (cx - 86, 582))
+        jn = JACKETS[st["jacket"]]["name"] if st["jacket"] is not None else "own jacket"
+        tn = TROUSERS[st["trousers"]]["name"] if st["trousers"] is not None else "own trousers"
+        screen.blit(small.render(f"Wearing: {jn}, {tn}  (J jacket, T trousers)", True, (150, 150, 165)), (cx - 86, 604))
         draw_tutorial(screen, hd["power"], look[5], t, mid, tiny)          # how their head works, in a real game
         # right panel
         rx = 880
@@ -855,6 +972,30 @@ def run(screen, root, shot=None, setup=None):
             screen.blit(small.render(P["name"] + "   (H to try it)", True, look[5]), (rx + 110, y + 3)); y += 26
             for ln in wrap(tiny, P["what"], 360):
                 screen.blit(tiny.render(ln, True, (190, 188, 200)), (rx, y)); y += 17
+        if picking is not None:                                # the weapon picker, over everything
+            px0, py0, pw0 = 360, 96, 470
+            ph0 = 70 + len(WLIST) * 25 + 30
+            pygame.draw.rect(screen, (14, 12, 20), (px0, py0, pw0, ph0), border_radius=10)
+            pygame.draw.rect(screen, look[5], (px0, py0, pw0, ph0), 2, border_radius=10)
+            screen.blit(mid.render("Choose a weapon", True, (240, 220, 160)), (px0 + 18, py0 + 12))
+            screen.blit(tiny.render("Old weapons of Japan and China. Letter or Enter picks · Q / Esc closes", True,
+                                    (150, 150, 165)), (px0 + 18, py0 + 40))
+            own = a["look"][1]
+            for j, wk in enumerate(WLIST):
+                y = py0 + 68 + j * 25
+                if j == picking:
+                    pygame.draw.rect(screen, (40, 36, 56), (px0 + 10, y - 2, pw0 - 20, 24), border_radius=5)
+                on = wk == st["weapon"]
+                L = "abcdefghijklmnoprstuvwxyz"[j]
+                screen.blit(small.render(L, True, (150, 150, 165)), (px0 + 20, y))
+                if wk is None:
+                    nm_ = f"Their own: {WEAPONS[own][1]}" if own else "Their own: bare hands"
+                    screen.blit(small.render(nm_, True, (240, 235, 220) if on else (190, 188, 200)), (px0 + 76, y))
+                    continue
+                g_, n_, where, sty = OLD_WEAPONS[wk]
+                screen.blit(glyph(g_, 20, look[5] if on else (205, 208, 215)), (px0 + 44, y - 2))
+                screen.blit(small.render(n_, True, (240, 235, 220) if on else (190, 188, 200)), (px0 + 76, y))
+                screen.blit(tiny.render(f"{where} · fights like a {sty}", True, (120, 120, 135)), (px0 + 250, y + 2))
         keys = "Up/Down who you were   Left/Right body   C skin   N name   R random   F fight   H head   Tab build   Enter begin   Esc quit"
         screen.blit(tiny.render(keys, True, (130, 130, 145)), (30, sh - 24))
         if msg and now - msg_t < 6:

@@ -163,3 +163,15 @@ World + biomes + rivers/towns/roads, weird look (user: "sparse and dim" flora), 
 ## Next ideas
 Items/loot, spells (shape x element x twist), shops in towns, character creation, better hero sprite, more immersion
 (sound, field of view/darkness, day/night, flavour text).
+
+## Clothes, old weapons, Q closes menus (Nov 2026)
+- Clothes: charcreate.JACKETS / TROUSERS (5 each: colour, hem colour, armour, speed %, carry kg). draw_char(clothes=(jacket,
+  trousers)): jacket colour replaces the coat over the middle, trousers band 68-100% of the body (+ hem bands).
+  None = the character's own old clothes (old look, no bonus). Creation screen: J / T cycle them. In game: C = Outfit
+  (DOS screen, Game.draw_outfit / outfit_input / wear()): jackets, trousers, and the weapons in your bag. Armour takes
+  off damage you take, speed multiplies walking speed, carry adds to Game.cap. Saved in character.json + player.json.
+- Old weapons: charcreate.OLD_WEAPONS (8 Japanese, 8 Chinese: symbol, name, origin, fighting style) are also items
+  (items.OLD, kind "weapon"); found in shrines, wardrobes, weapon racks. Creation: X opens a weapon picker; the pick
+  goes in your hand at the start (character.json "weapon_item"). Attack animation style follows the wielded weapon.
+- Q closes every menu/overlay (bag, item box, containers, build menu + placing, map, size slider, outfit, the creation
+  weapon picker and builder editing). It never quits the game. So menu letters skip q (Game.LETTERS); drinks are [e].

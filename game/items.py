@@ -27,7 +27,26 @@ ITEMS = {
     "rope":      ("rope", "part", 0.8, (170, 150, 100), {}),
     "fuel":      ("fuel cell", "part", 2.0, (230, 200, 60), {}),
     "wood":      ("bundle of wood", "part", 1.2, (150, 110, 70), {}),
+    # old weapons of Japan and China (charcreate.OLD_WEAPONS has their symbols and fighting styles)
+    "katana":    ("katana", "weapon", 1.2, (215, 215, 225), {"dmg": 4}),
+    "wakizashi": ("wakizashi", "weapon", 0.7, (205, 205, 215), {"dmg": 3}),
+    "tanto":     ("tantō", "weapon", 0.3, (200, 200, 210), {"dmg": 2}),
+    "naginata":  ("naginata", "weapon", 2.5, (180, 140, 90), {"dmg": 4}),
+    "yari":      ("yari spear", "weapon", 2.0, (170, 140, 100), {"dmg": 4}),
+    "kusarigama": ("kusarigama", "weapon", 1.5, (160, 160, 170), {"dmg": 3}),
+    "kanabo":    ("kanabō club", "weapon", 6.0, (90, 80, 70), {"dmg": 5}),
+    "yumi":      ("yumi bow", "weapon", 1.0, (190, 150, 90), {"dmg": 3}),
+    "jian":      ("jian", "weapon", 1.0, (220, 220, 200), {"dmg": 3}),
+    "dao":       ("dao sabre", "weapon", 1.3, (210, 200, 190), {"dmg": 4}),
+    "guandao":   ("guan dao", "weapon", 5.5, (200, 60, 50), {"dmg": 5}),
+    "ji":        ("ji halberd", "weapon", 3.0, (190, 170, 120), {"dmg": 4}),
+    "meteor":    ("meteor hammer", "weapon", 2.5, (150, 150, 160), {"dmg": 4}),
+    "hooks":     ("pair of hook swords", "weapon", 2.0, (200, 200, 210), {"dmg": 3}),
+    "butterfly": ("pair of butterfly swords", "weapon", 1.4, (210, 210, 220), {"dmg": 3}),
+    "chukonu":   ("chu-ko-nu crossbow", "weapon", 2.2, (160, 120, 80), {"dmg": 3}),
 }
+OLD = ["katana", "wakizashi", "tanto", "naginata", "yari", "kusarigama", "kanabo", "yumi",
+       "jian", "dao", "guandao", "ji", "meteor", "hooks", "butterfly", "chukonu"]
 
 # what turns up where: container code -> (chance of anything, [(item, weight), ...], most items)
 LOOT = {
@@ -38,7 +57,7 @@ LOOT = {
     "f_crate":  (0.85, [("beans", 3), ("water", 3), ("scrap", 3), ("rope", 2), ("crowbar", 1), ("fuel", 1)], 3),
     "f_sink":   (0.4, [("water", 4), ("bandage", 1)], 1),
     "f_fridge": (0.75, [("beans", 2), ("water", 3), ("fruit", 2), ("jerky", 2), ("tea", 2)], 3),
-    "f_ward":   (0.6, [("cloth", 4), ("rope", 1), ("bandage", 1)], 2),
+    "f_ward":   (0.6, [("cloth", 4), ("rope", 1), ("bandage", 1), ("tanto", 1)], 2),
     "f_bench":  (0.85, [("crowbar", 1), ("pipe", 1), ("wire", 3), ("scrap", 3), ("battery", 1), ("circuit", 1)], 3),
     "f_barrel": (0.5, [("fuel", 1), ("water", 1), ("scrap", 1)], 1),
     "f_drum":    (0.4, [("fuel", 1), ("scrap", 2), ("jerky", 1)], 1),
@@ -47,10 +66,13 @@ LOOT = {
     "f_bucket":  (0.45, [("water", 3), ("rope", 1)], 1),
     "f_rags":    (0.6, [("cloth", 4), ("bandage", 2)], 2),
     "f_wbarrel": (0.7, [("water", 5)], 2),
-    "f_shrine":  (0.6, [("medkit", 1), ("circuit", 1), ("fruit", 2), ("bandage", 1)], 1),
+    "f_shrine":  (0.7, [("medkit", 1), ("circuit", 1), ("fruit", 2), ("bandage", 1), ("katana", 1), ("jian", 1),
+                        ("wakizashi", 1), ("butterfly", 1), ("tanto", 1)], 1),
     "p_crate":  (0.8, [("scrap", 4), ("wire", 3), ("beans", 2), ("water", 2), ("circuit", 1), ("crowbar", 1)], 3),
     "p_barrel": (0.6, [("water", 4), ("fuel", 1), ("scrap", 2)], 2),
-    "p_rack":   (0.6, [("pipe", 2), ("scrap", 3), ("wire", 2), ("rope", 1), ("battery", 1)], 2),
+    "p_rack":   (0.6, [("pipe", 2), ("scrap", 3), ("wire", 2), ("rope", 1), ("battery", 1), ("naginata", 1),
+                       ("yari", 1), ("ji", 1), ("guandao", 1), ("kanabo", 1), ("dao", 1), ("meteor", 1), ("hooks", 1),
+                       ("kusarigama", 1), ("yumi", 1), ("chukonu", 1)], 2),
     "p_cart":   (0.6, [("scrap", 3), ("rope", 2), ("beans", 1), ("fuel", 1)], 2),
     "p_wagon":  (0.6, [("scrap", 3), ("cloth", 2), ("rope", 2), ("jerky", 1)], 2),
     "p_scrap":  (0.9, [("scrap", 5), ("wire", 2), ("circuit", 1), ("battery", 1)], 3),
@@ -99,6 +121,10 @@ GLYPH = {
     "water": ("!", "lblue"), "tea": ("!", "brown"),
     "bandage": ("≈", "white"), "medkit": ("♥", "lred"),
     "knife": (")", "white"), "crowbar": (")", "red"), "pipe": (")", "grey"),
+    "katana": (")", "white"), "wakizashi": (")", "white"), "tanto": (")", "grey"), "naginata": ("/", "brown"),
+    "yari": ("/", "brown"), "kusarigama": ("(", "grey"), "kanabo": ("\\", "dgrey"), "yumi": ("}", "brown"),
+    "jian": (")", "yellow"), "dao": (")", "white"), "guandao": ("/", "lred"), "ji": ("/", "yellow"),
+    "meteor": ("(", "grey"), "hooks": (")", "lcyan"), "butterfly": (")", "lcyan"), "chukonu": ("}", "brown"),
     "scrap": ("*", "dgrey"), "wire": ("~", "yellow"), "battery": ("■", "lgreen"), "circuit": ("≡", "green"),
     "cloth": ("░", "magenta"), "rope": ("§", "brown"), "fuel": ("♦", "yellow"),
     "wood": ("=", "brown"),
@@ -125,6 +151,22 @@ DESC = {
     "rope": "Strong rope, frayed at one end as if it was cut in a hurry.",
     "fuel": "A fuel cell. Precious. The colony would have killed for this. Maybe someone did.",
     "wood": "Dead branches, snapped and bundled. Everything out here burns, eventually.",
+    "katana": "Japan. A long curved sword, two hands on the grip. Someone carried it a very long way from Earth.",
+    "wakizashi": "Japan. The katana's shorter companion. Quick in tight places.",
+    "tanto": "Japan. A short straight dagger, more for the last moment than the first.",
+    "naginata": "Japan. A curved blade on a long pole. Sweeps keep things at a distance.",
+    "yari": "Japan. A straight spear. Whatever comes at you meets the point first.",
+    "kusarigama": "Japan. A sickle on a weighted chain. Swing, snare, pull.",
+    "kanabo": "Japan. A studded iron club. Heavy enough that technique stops mattering.",
+    "yumi": "Japan. A tall asymmetric bow of bamboo and lacquer, the string still taut.",
+    "jian": "China. A straight double-edged sword, the 'gentleman of weapons'. Light and precise.",
+    "dao": "China. A single-edged sabre, broad at the tip. The 'general of weapons'.",
+    "guandao": "China. A heavy crescent blade on a long shaft, red tassel gone brown.",
+    "ji": "China. A spear with a crescent blade bolted to the side. Thrust or hook.",
+    "meteor": "China. Two iron weights on a long rope. Hard to learn, harder to get away from.",
+    "hooks": "China. Twin swords with hooked tips that lock together into one long whip of steel.",
+    "butterfly": "China. A pair of short broad blades, one for each hand.",
+    "chukonu": "China. A repeating crossbow with a magazine of bolts on top. Pull the lever, loose, again.",
 }
 
 
@@ -134,7 +176,7 @@ def plural(k, n):
     if n == 1:
         return ("an " if name[0] in "aeiou" else "a ") + name
     head, sep, tail = name.partition(" of ")
-    irregular = {"loaf": "loaves", "knife": "knives", "strip": "strips"}
+    irregular = {"loaf": "loaves", "knife": "knives", "strip": "strips", "pair": "pairs"}
     last = head.split()[-1]
     if last in irregular:
         head = head[: -len(last)] + irregular[last]

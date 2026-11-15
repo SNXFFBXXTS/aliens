@@ -7,7 +7,8 @@
   rl --seed N   start a world from a given seed
 
 Keys: arrows / WASD / numpad (7 9 1 3 diagonals) move, walk into a creature to attack,
-      . or numpad 5 wait a turn, M world map, Esc saves and quits
+      . or numpad 5 wait a turn, M world map, C outfit (clothes + weapon), Q or Esc closes a menu,
+      Esc saves and quits
 
 Turn-based: every step or attack is one turn, then the creatures act.
 The world is split into chunks (one world-map tile = 12 x 12 cells). A chunk is generated the first time
@@ -522,6 +523,8 @@ class Game:
         self.cap = 12 + self.stat["STR"] * 1.5             # how much you can carry before you slow down
         self.headinfo = (self.char.get("head") or heads.default_head(self.char.get("look"))) if self.char else \
             {"power": "boomerang", "glyph": "頭"}
+        self.base_cap = self.cap
+        self.jacket, self.trousers = (self.char or {}).get("jacket"), (self.char or {}).get("trousers")
         st = self.load_state()
         if st:
             self.lvl, self.xp, self.turn = st.get("lvl", 1), st.get("xp", 0), st.get("turn", 0)
@@ -531,6 +534,7 @@ class Game:
             self.food, self.water = st.get("food", 100.0), st.get("water", 100.0)
             self.tame = set(st.get("tame", []))
             self.weapon = st.get("weapon") if st.get("weapon") in self.inv else None
+            self.jacket, self.trousers = st.get("jacket", self.jacket), st.get("trousers", self.trousers)
             self.w.dead = set(st.get("dead", []))
             self.px, self.py = st["px"], st["py"]
             for i in self.w.dead:
@@ -539,10 +543,15 @@ class Game:
         else:
             self.px, self.py = self.start_spot()
             self.hp = self.maxhp
+            start_w = (self.char or {}).get("weapon_item")          # the old weapon picked at the start, in hand
+            if start_w in items.ITEMS:
+                self.inv[start_w] = 1
+                self.weapon = start_w
             self.new_story = bool(self.char)                # main() opens a new story on a title card
             who = f"{self.char['name']}, {self.char['archetype'].lower()}, " if self.char else "You "
             self.say(who + ("come" if not self.char else "comes") + " down near a settlement. Smoke, but no voices. "
                      "(M world map, E search, I bag)")
+        self.wear()
         if not getattr(self.w, "showcase", False):
             self.w.start_world_map()
         self.here = self.w.cell(self.px, self.py)
@@ -566,6 +575,20 @@ class Game:
         except (OSError, ValueError):
             return None
 
+    def wear(self, jacket=False, trousers=False):
+        """put on a jacket / trousers (index, None = your own old clothes; False = keep) and feel the difference"""
+        import charcreate
+        if jacket is not False:
+            self.jacket = jacket
+        if trousers is not False:
+            self.trousers = trousers
+        n = (len(charcreate.JACKETS), len(charcreate.TROUSERS))
+        self.jacket = self.jacket if isinstance(self.jacket, int) and 0 <= self.jacket < n[0] else None
+        self.trousers = self.trousers if isinstance(self.trousers, int) and 0 <= self.trousers < n[1] else None
+        self.armour, speed, carry = charcreate.outfit_bonus(self.jacket, self.trousers)
+        self.speed_mul = 1 + speed / 100
+        self.cap = self.base_cap + carry
+
     def char_look(self):
         """in the world you're just your symbol: no gear symbols round it (they stay in the menu)"""
         c = self.char
@@ -574,12 +597,13 @@ class Game:
     def hero_surface(self, left):
         """you, as your symbol with its gear, facing the way you walk"""
         headon = self.head_out is None
-        key = ("hero", left, headon)
+        key = ("hero", left, headon, self.jacket, self.trousers)
         if key not in self.mob_img:
             import charcreate
             s = pygame.Surface((PX * 3, PX * 3), pygame.SRCALPHA)
             charcreate.draw_char(s, PX * 3 // 2, PX * 3 // 2, int(PX * 1.1), self.char["body"], self.char_look(),
-                                 tuple(self.char["skin_rgb"]), None, head=self.headinfo["glyph"] if headon else "")
+                                 tuple(self.char["skin_rgb"]), None, head=self.headinfo["glyph"] if headon else "",
+                                 clothes=(self.jacket, self.trousers))
             rim = pygame.mask.from_surface(s).to_surface(setcolor=(235, 230, 215, 120), unsetcolor=(0, 0, 0, 0))
             out = pygame.Surface(s.get_size(), pygame.SRCALPHA)
             for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):  # a faint light outline so you stand out
@@ -726,7 +750,8 @@ class Game:
         with open(self.state_path() + ".tmp", "w") as f:
             json.dump({"px": self.px, "py": self.py, "hp": self.hp, "lvl": self.lvl, "xp": self.xp, "turn": self.turn,
                        "dead": sorted(self.w.dead), "inv": self.inv, "food": round(self.food, 1),
-                       "water": round(self.water, 1), "weapon": self.weapon, "tame": sorted(self.tame)}, f)
+                       "water": round(self.water, 1), "weapon": self.weapon, "tame": sorted(self.tame),
+                       "jacket": self.jacket, "trousers": self.trousers}, f)
         os.replace(self.state_path() + ".tmp", self.state_path())
         if not self.w.showcase:
             with open(os.path.join(ROOT, "current.json"), "w") as f:
@@ -825,7 +850,7 @@ class Game:
     def attack(self, m):
         if self.char:                                       # do one of your weapon's moves
             import charcreate
-            style = charcreate.STYLE.get(self.char["look"][1], "unarmed")
+            style = charcreate.STYLE.get(self.weapon if self.weapon in charcreate.STYLE else self.char["look"][1], "unarmed")
             self.anim = (style, random.choice(charcreate.MOVES[style]), time.monotonic())
         hit = min(0.95, max(0.3, 0.82 + (self.lvl - m.sp.defn - m.tier) * 0.04 + (self.stat["AGI"] - 5) * 0.02))
         if not m.angry:
@@ -1075,6 +1100,8 @@ class Game:
             return
         lo, hi = m.dmg()
         d = random.randint(lo, hi)
+        if getattr(self, "armour", 0) and d > 1:              # your jacket / trousers take some of it
+            d = max(1, d - self.armour)
         self.hp -= d
         self.flash["you"] = time.monotonic()
         self.amb.fx("hurt")
@@ -1135,7 +1162,8 @@ class Game:
         self.sync()
         if getattr(self, "cold_open", None):
             return
-        if self.dead or self.show_map or self.show_inv or self.loot or getattr(self, "build_menu", False):
+        if self.dead or self.show_map or self.show_inv or self.loot or getattr(self, "build_menu", False) or \
+                getattr(self, "outfit", False):
             return
         now = time.monotonic()
         if now < self.freeze_until:                           # hit-stop: everything holds for a beat
@@ -1157,7 +1185,7 @@ class Game:
         ix, iy = max(-1, min(1, ix)), max(-1, min(1, iy))
         if ix or iy:
             n = math.hypot(ix, iy)
-            spd = SPEED * (0.55 if items.weight(self.inv) > self.cap else 1.0)   # overloaded: you trudge
+            spd = SPEED * (0.55 if items.weight(self.inv) > self.cap else 1.0) * getattr(self, "speed_mul", 1.0)
             tx, ty = ix / n * spd, iy / n * spd
             a = min(1.0, dt * ACCEL)
             self.vx += (tx - self.vx) * a
@@ -1370,7 +1398,7 @@ class Game:
                 self.weapon = None
         self.say(f"You throw away the {items.ITEMS[k][0]}.")
 
-    LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    LETTERS = "abcdefghijklmnoprstuvwxyzABCDEFGHIJKLMNOPRSTUVWXYZ"   # no q / Q: Q closes menus
 
     def menu_inv(self):
         """the things the open menu is listing"""
@@ -1403,7 +1431,7 @@ class Game:
                 key = next(L for L, k in by_letter.items() if k == hit)
         elif e.type == pygame.KEYDOWN:
             key = e.unicode or None
-            if e.key == pygame.K_ESCAPE:
+            if e.key in (pygame.K_ESCAPE, pygame.K_q):
                 key = "ESC"
             elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 key = "ENTER"
@@ -1414,7 +1442,7 @@ class Game:
         if self.detail:                                          # an item's description is open
             k = self.detail
             kind = items.ITEMS[k][1]
-            act = {"food": "e", "drink": "q", "medical": "a", "weapon": "w"}.get(kind)
+            act = {"food": "e", "drink": "e", "medical": "a", "weapon": "w"}.get(kind)
             if key == act:
                 self.use_item(k)
                 self.detail = None
@@ -1996,7 +2024,7 @@ class Game:
             D.put(6, y + 1, what, "dgrey")
             y += 2
         D.put(0, 23, "─" * 80, "dgrey")
-        D.put(1, 24, "[a-k] choose, then place it: [Enter]/[E]/click builds  [X] takes yours down  [Esc] done", "grey")
+        D.put(1, 24, "[a-k] choose, then place it: [Enter]/[E]/click builds  [X] takes yours down  [Q] done", "grey")
         self._dos_place = D.blit_to(self.screen)
 
     def draw_build_ghost(self, S, top, cxp, cyp):
@@ -2012,7 +2040,7 @@ class Game:
             S.blit(g, (X, Y))
             pygame.draw.rect(S, (120, 240, 150) if ok else (240, 90, 90), (X, Y, PX, PX), 1)
         name = items.BUILD[r][0]
-        img = self.small.render(f"{name}  (Enter/click build, X take down, Esc done)", True, (230, 230, 220))
+        img = self.small.render(f"{name}  (Enter/click build, X take down, Q done)", True, (230, 230, 220))
         X, Y = x * PX - cxp, y * PX - cyp + top
         bg = pygame.Surface((img.get_width() + 10, img.get_height() + 4), pygame.SRCALPHA)
         bg.fill((10, 8, 14, 200))
@@ -2289,7 +2317,7 @@ class Game:
             card.blit(g, (int(sw * 0.02), int(sh * 0.02)))
             fig = pygame.Surface((int(sh * 0.9), int(sh * 0.9)), pygame.SRCALPHA)      # them, flat and bold
             charcreate.draw_char(fig, fig.get_width() // 2, fig.get_height() // 2, int(sh * 0.42), self.char["body"],
-                                 look, tuple(self.char["skin_rgb"]), None)
+                                 look, tuple(self.char["skin_rgb"]), None, clothes=(self.jacket, self.trousers))
             card.blit(fig, (int(sw * 0.62) - fig.get_width() // 2, int(sh * 0.52) - fig.get_height() // 2))
             serif = "/usr/share/fonts/noto/NotoSerif-BoldItalic.ttf"
             try:
@@ -2368,11 +2396,14 @@ class Game:
         if getattr(self, "build_menu", False) and e.type == pygame.KEYDOWN:   # the build menu
             if e.unicode and e.unicode in self.LETTERS[:len(items.BUILD)]:   # (letters first: b is a recipe too)
                 self.placing, self.build_menu = self.LETTERS.index(e.unicode), False
-            elif e.key == pygame.K_ESCAPE:
+            elif e.key in (pygame.K_ESCAPE, pygame.K_q):
                 self.build_menu = False
             return True
+        if getattr(self, "outfit", False) and e.type == pygame.KEYDOWN:       # the outfit menu (C)
+            self.outfit_input(e)
+            return True
         if getattr(self, "placing", None) is not None and e.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
-            if e.type == pygame.KEYDOWN and e.key in (pygame.K_ESCAPE,):
+            if e.type == pygame.KEYDOWN and e.key in (pygame.K_ESCAPE, pygame.K_q):
                 self.placing = None
                 return True
             if e.type == pygame.KEYDOWN and e.key == pygame.K_b:
@@ -2424,6 +2455,14 @@ class Game:
                 self.use_head()
             elif k == pygame.K_b and not self.show_map:
                 self.build_menu = True
+            elif k == pygame.K_c and not self.show_map and self.char:
+                self.outfit = True
+            elif k == pygame.K_q:                       # Q closes whatever's open (never quits the game)
+                if self.show_map:
+                    self.show_map = False
+                elif self.sizer:
+                    self.sizer = False
+                    self.save_settings()
             elif k == pygame.K_g and not self.show_map:
                 self.start_gather()
             elif k == pygame.K_v:
@@ -3118,7 +3157,7 @@ class Game:
         info = f"You are in: {NAMES.get(here, here)}     Explored {len(self.w.visited)} squares     Towns visited " \
                f"{sum(1 for t in self.w.wd.towns if t in self.w.visited)} / {len(self.w.wd.towns)}"
         self.screen.blit(self.font.render(info, True, (210, 205, 195)), (ox, oy + mh + 8))
-        hint = self.small.render("Arrows: look around    M / Enter / Esc: back    "
+        hint = self.small.render("Arrows: look around    M / Q / Esc: back    "
                                  "Clear = explored, dark = not yet    house = town", True, (150, 145, 140))
         self.screen.blit(hint, (ox, oy + mh + 30))
 
@@ -3261,12 +3300,103 @@ class Game:
         if self.sizer and not self.show_map:
             self.draw_sizer()
 
-        keys = self.small.render("Move: WASD   F head   E search   G gather wood   B build   I bag   M map   V minimap   +/- zoom   N sound   Esc quit", True, (100, 100, 110))
+        keys = self.small.render("Move: WASD   F head   E search   G gather wood   B build   I bag   C outfit   M map   V minimap   +/- zoom   N sound   Esc quit", True, (100, 100, 110))
         self.screen.blit(keys, (sw - keys.get_width() - 10, sh - 18))
         if self.show_inv or self.loot:                       # the menus take over the whole screen, DOS-style
             self.draw_menu()
         if getattr(self, "build_menu", False):
             self.draw_build_menu()
+        if getattr(self, "outfit", False):
+            self.draw_outfit()
+
+    def outfit_rows(self):
+        """[(letter, what, value)] for the outfit menu: jackets, trousers, then the weapons you carry"""
+        import charcreate
+        rows, n = [], 0
+        for kind, lst in (("jacket", charcreate.JACKETS), ("trousers", charcreate.TROUSERS)):
+            for i in [None] + list(range(len(lst))):
+                rows.append((self.LETTERS[n], kind, i))
+                n += 1
+        for k in [None] + [k for k in self.sorted_items(self.inv) if items.ITEMS[k][1] == "weapon"]:
+            rows.append((self.LETTERS[n] if n < len(self.LETTERS) else "?", "weapon", k))
+            n += 1
+        return rows
+
+    def outfit_input(self, e):
+        if e.key in (pygame.K_ESCAPE, pygame.K_q):
+            self.outfit = False
+            return
+        hit = next((r for r in self.outfit_rows() if e.unicode and r[0] == e.unicode), None)
+        if not hit:
+            return
+        import charcreate
+        _, kind, v = hit
+        if kind == "weapon":
+            if v != self.weapon:
+                self.weapon = v
+                self.say(f"You ready the {items.ITEMS[v][0]}." if v else "You put your weapon away. Fists, then.")
+        else:
+            self.wear(**{kind: v})
+            lst = charcreate.JACKETS if kind == "jacket" else charcreate.TROUSERS
+            self.say(f"You put on the {lst[v]['name'].lower()}." if v is not None else f"You put your own {kind} back on.")
+        self.amb.fx("equip", 1.2)
+
+    def draw_outfit(self):
+        """C: change jacket, trousers and weapon. A DOS screen like the bag, with you drawn on the right"""
+        import dosui, charcreate
+        if not hasattr(self, "dos"):
+            self.dos = dosui.Dos()
+        D = self.dos
+        D.clear()
+        D.put(1, 0, "Outfit", "white")
+        D.put(1, 1, "What do you want to wear and carry?", "yellow")
+        arm, spd, car = charcreate.outfit_bonus(self.jacket, self.trousers)
+        txt = f"Armour {arm}  Speed {spd:+d}%  Carry {self.cap:.0f} kg"
+        D.put(79 - len(txt), 0, txt, "cyan")
+        y, last = 3, None
+        for L, kind, v in self.outfit_rows():
+            if kind != last:
+                if last:
+                    y += 1
+                D.put(1, y, {"jacket": "Jackets", "trousers": "Trousers", "weapon": "Weapons (from your bag)"}[kind], "lblue")
+                y += 1
+                last = kind
+            if y > 22:
+                break
+            on = v == {"jacket": self.jacket, "trousers": self.trousers, "weapon": self.weapon}[kind]
+            col = "white" if on else "grey"
+            D.put(2, y, f"{L} {'+' if on else '-'} ", col)
+            if kind == "weapon":
+                if v is None:
+                    D.put(8, y, "bare hands", col)
+                else:
+                    g, gc = items.GLYPH[v]
+                    D.put(6, y, g, gc)
+                    D.put(8, y, items.ITEMS[v][0], col)
+                    ow = charcreate.OLD_WEAPONS.get(v)
+                    D.put(36, y, f"+{items.ITEMS[v][4].get('dmg', 0)} dmg" + (f"  {ow[2]}" if ow else ""), "dgrey")
+            else:
+                lst = charcreate.JACKETS if kind == "jacket" else charcreate.TROUSERS
+                if v is None:
+                    D.put(8, y, f"your own {kind}", col)
+                else:
+                    D.put(6, y, "█", tuple(lst[v]["col"]))
+                    D.put(8, y, lst[v]["name"], col)
+                    D.put(28, y, charcreate.bonus_text(lst[v]), "dgrey")
+            y += 1
+        D.put(0, 23, "─" * 80, "dgrey")
+        D.put(1, 24, "[letter] wear or hold it   [Q] done   (find old weapons in shrines and racks)", "grey")
+        self._dos_place = D.blit_to(self.screen)
+        # you, in it, on the right
+        sw, sh = self.screen.get_size()
+        size = int(sh * 0.3)
+        fig = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+        gear = list(self.char.get("look", [None] * 4))[:4]
+        gear[1] = self.weapon if self.weapon in charcreate.WEAPONS else (None if self.weapon is None else "crowbar")
+        look = tuple(gear) + (tuple(self.char["coat"]), tuple(self.char["trim"]))
+        charcreate.draw_char(fig, size, size, size, self.char["body"], look, tuple(self.char["skin_rgb"]), None,
+                             head=self.headinfo["glyph"], clothes=(self.jacket, self.trousers))
+        self.screen.blit(fig, (int(sw * 0.74) - size, int(sh * 0.5) - size))
 
     def draw_menu(self):
         """the inventory / pick-up menus: a full DOS text screen, Dungeon Crawl Stone Soup-style"""
@@ -3321,9 +3451,9 @@ class Game:
             y += 1
         bar = "─" * 80
         D.put(0, 24 - 1, bar, "dgrey")
-        foot = ("[a-z] mark  [,] all  [-] none  [Enter] take  [Tab] put in  [Esc] leave" if self.loot and self.mode == "take"
-                else "[a-z] mark  [Enter] put in  [Tab] take out  [Esc] leave" if self.loot
-                else "[a-z] look at an item   [Esc] close")
+        foot = ("[a-z] mark  [,] all  [-] none  [Enter] take  [Tab] put in  [Q] leave" if self.loot and self.mode == "take"
+                else "[a-z] mark  [Enter] put in  [Tab] take out  [Q] leave" if self.loot
+                else "[a-z] look at an item   [Q] close")
         D.put(1, 24, foot, "grey")
         if self.detail and self.detail in self.inv:            # one item, described, with what you can do
             k = self.detail
@@ -3339,9 +3469,9 @@ class Game:
             D.put(11, yy, line, "grey")
             stats = ", ".join(f"+{v} {n_}" for n_, v in eff.items())
             D.put(11, 14, (stats + "   " if stats else "") + f"{kg:.1f} kg each, you have {self.inv[k]}", "cyan")
-            act = {"food": "[e]at", "drink": "[q]uaff", "medical": "[a]pply",
+            act = {"food": "[e]at", "drink": "[e] drink", "medical": "[a]pply",
                    "weapon": "[w]ield" if self.weapon != k else "[w] put away"}.get(kind, "")
-            D.put(11, 16, f"{act}   [d]rop   [Esc] back".strip(), "yellow")
+            D.put(11, 16, f"{act}   [d]rop   [Q] back".strip(), "yellow")
         self._dos_place = D.blit_to(self.screen)
 
     def draw_death(self):
